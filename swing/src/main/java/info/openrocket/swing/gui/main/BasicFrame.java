@@ -267,7 +267,16 @@ private static final Translator trans = Application.getTranslator();
 		vertical.setResizeWeight(0.5);
 		vertical.setTopComponent(tabbedPane);
 		vertical.setBottomComponent(rocketpanel);
-		this.add(vertical);
+		
+		//// The Qwen AI Assistant Panel
+		info.openrocket.swing.gui.components.QwenAssistantPanel qwenAssistantPanel = new info.openrocket.swing.gui.components.QwenAssistantPanel(this, document);
+		
+		JSplitPane horizontal = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, true);
+		horizontal.setResizeWeight(0.7); // 70% space for rocket design, 30% for AI
+		horizontal.setLeftComponent(vertical);
+		horizontal.setRightComponent(qwenAssistantPanel);
+
+		this.add(horizontal);
 
 		// Populate the popup menu
 		{
@@ -854,6 +863,8 @@ private static final Translator trans = Application.getTranslator();
 			}
 		});
 		toolsMenu.add(item);
+
+		toolsMenu.addSeparator();
 
 		item = new JMenuItem(trans.get("PhotoFrame.title"), KeyEvent.VK_P);
 		item.getAccessibleContext().setAccessibleDescription(trans.get("PhotoFrame.desc"));

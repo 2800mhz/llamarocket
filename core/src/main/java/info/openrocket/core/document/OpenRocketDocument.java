@@ -85,6 +85,17 @@ public class OpenRocketDocument implements ComponentChangeListener, StateChangeL
 	// The Photo Settings will be saved in the core module as a map of key values with corresponding content
 	private Map<String, String> photoSettings = new HashMap<>();
 	
+	// Qwen AI Assistant Chat History
+	private com.google.gson.JsonArray qwenChatHistory = new com.google.gson.JsonArray();
+	
+	public com.google.gson.JsonArray getQwenChatHistory() {
+		return qwenChatHistory;
+	}
+	
+	public void setQwenChatHistory(com.google.gson.JsonArray history) {
+		this.qwenChatHistory = history;
+	}
+
 	/*
 	 * The undo/redo variables and mechanism are documented in doc/undo-redo-flow.*
 	 */

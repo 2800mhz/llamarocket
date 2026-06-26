@@ -106,6 +106,7 @@ open module info.openrocket.core {
 	exports info.openrocket.core.startup.jij;
   exports info.openrocket.core.thrustcurve.serialization;
 	exports info.openrocket.core.aerodynamics.lookup;
+	exports info.openrocket.core.ai;
 
 	// Service providers
 	// Also edit core/src/main/resources/META-INF/services !! (until gradle-modules-plugin supports service

@@ -122,6 +122,19 @@ public class OpenRocketSaver extends RocketSaver {
 		// Save document preferences
 		saveDocumentPreferences(document.getDocumentPreferences());
 		
+		// Save Qwen AI History
+		if (document.getQwenChatHistory() != null && document.getQwenChatHistory().size() > 0) {
+			writeln("<qwenChatHistory>");
+			indent++;
+			// The JSON string needs to be escaped so it doesn't break XML
+			String json = document.getQwenChatHistory().toString();
+			// Minimal escaping for XML text
+			json = json.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+			writeln(json);
+			indent--;
+			writeln("</qwenChatHistory>");
+		}
+		
 		indent--;
 		writeln("</openrocket>");
 		

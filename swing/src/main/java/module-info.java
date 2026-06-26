@@ -24,6 +24,7 @@ open module info.openrocket.swing {
 	requires org.jogamp.gluegen.rt;
 	requires org.jogamp.jogl.all;
 	requires java.scripting;
+	requires com.google.gson;
 	requires org.fife.RSyntaxTextArea;
 	requires jakarta.xml.bind;
 	requires jcommon;

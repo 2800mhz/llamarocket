@@ -20,7 +20,7 @@ application {
     mainModule = 'info.openrocket.swing'
     mainClass = 'info.openrocket.swing.startup.OpenRocket'
 
-    /*applicationDefaultJvmArgs = [
+    applicationDefaultJvmArgs = [
             // Use the system appearance on macOS for the FlatLaf title bar
             '-Dapple.awt.application.appearance=system',
             // Fix JOGL 3D importing on Windows
@@ -36,7 +36,7 @@ application {
             '-Dsun.java2d.ddforcevram=true',
             '-Dsun.java2d.ddblit=false',
             '-Dswing.useflipBufferStrategy=True'
-    ]*/
+    ]
 }
 
 // Fetch the build version from the build.properties file
@@ -71,6 +71,9 @@ allprojects {
 
 subprojects {
     apply plugin: 'java'
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+    }
 
     // Workaround for Windows "CreateProcess error=206" (command line too long).
     //

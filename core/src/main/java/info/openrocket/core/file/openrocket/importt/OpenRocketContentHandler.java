@@ -72,8 +72,24 @@ class OpenRocketContentHandler extends AbstractElementHandler {
 			return new DocumentPreferencesHandler(getDocument());
 		}
 
-		warnings.add(Warning.fromString("Unknown element " + element + ", ignoring."));
+		if (element.equals("qwenChatHistory")) {
+			return info.openrocket.core.file.simplesax.PlainTextHandler.INSTANCE;
+		}
+
+		warnings.add(Warning.fromString("Unknown element " + element + " within <openrocket>"));
 
 		return null;
+	}
+
+	@Override
+	public void closeElement(String element, HashMap<String, String> attributes, String content, WarningSet warnings) {
+		if (element.equals("qwenChatHistory") && content != null && !content.trim().isEmpty()) {
+			try {
+				com.google.gson.JsonArray arr = com.google.gson.JsonParser.parseString(content).getAsJsonArray();
+				getDocument().setQwenChatHistory(arr);
+			} catch (Exception e) {
+				warnings.add(Warning.fromString("Could not parse Qwen chat history: " + e.getMessage()));
+			}
+		}
 	}
 }
