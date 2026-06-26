@@ -1,4 +1,4 @@
-# 🚀 QwenRocket (LlamaRocket)
+# 🚀LlamaRocket
 
 **QwenRocket** (formerly known as LlamaRocket) is an AI-Enhanced fork of the OpenRocket simulator. It features an integrated AI Assistant powered by local LLMs (Qwen/Llama) to help you design, optimize, and simulate multi-stage rockets through natural language prompts.
 
