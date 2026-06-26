@@ -13,6 +13,10 @@ import info.openrocket.core.rocketcomponent.InnerTube;
 import info.openrocket.core.rocketcomponent.EngineBlock;
 import info.openrocket.core.rocketcomponent.Parachute;
 import info.openrocket.core.rocketcomponent.MotorMount;
+import info.openrocket.core.rocketcomponent.AxialStage;
+import info.openrocket.core.rocketcomponent.ShockCord;
+import info.openrocket.core.rocketcomponent.Transition;
+import info.openrocket.core.rocketcomponent.MassComponent;
 import info.openrocket.core.motor.Motor;
 import info.openrocket.core.motor.MotorConfiguration;
 import info.openrocket.core.startup.Application;
@@ -42,75 +46,71 @@ import java.time.Instant;
 
 public class QwenAgent {
 
-    private static final String SYSTEM_PROMPT = 
-        "You are QwenRocket, an expert AI rocket design agent.\n" +
-        "You are pair programming with a user to optimize a model rocket in OpenRocket.\n" +
-        "You have the ability to modify the rocket's dimensions and run simulations to see the results.\n\n" +
-        "At each step, you will be given the CURRENT ROCKET COMPONENT TREE (with parameters) and the LATEST SIMULATION RESULTS.\n" +
-        "You must output a single JSON block wrapped in ```json ... ``` with your next action.\n\n" +
-        "Available actions:\n" +
-        "1. modify_components\n" +
-        "   Required keys: \"action\": \"modify_components\", \"modifications\": [{\"component_name\": \"<name>\", \"parameter\": \"<param>\", \"new_value\": <float>}, ...]\n" +
-        "   Use this to change one or more dimensions AT THE SAME TIME (values must be in meters). The simulation will be run automatically after your modifications to show you the new results.\n\n" +
-        "2. add_components\n" +
-        "   Required keys: \"action\": \"add_components\", \"components\": [{\"type\": \"<type>\", \"parent\": \"<parent_name>\", \"name\": \"<new_name>\"}, ...]\n" +
-        "   Use this to add new physical parts to the rocket.\n" +
-        "   ALLOWED TYPES & PARENTS:\n" +
-        "   - NoseCone, BodyTube -> Can be added to a Stage (like \"Devam Et\")\n" +
-        "   - TrapezoidFinSet, InnerTube, EngineBlock, Parachute -> MUST be added to a BodyTube (NOT a Stage!)\n" +
-        "   CRITICAL RULES FOR add_components:\n" +
-        "   - NEVER use a parent name that doesn't exist in the CURRENT ROCKET COMPONENT TREE, unless you JUST created it in the same array.\n" +
-        "   - Do NOT invent parent names like \"Stage2 Tube\" if you didn't explicitly create them.\n" +
-        "   EXAMPLE TO BUILD A BASIC ROCKET IN ONE GO:\n" +
-        "   {\"action\": \"add_components\", \"components\": [\n" +
-        "     {\"type\": \"NoseCone\", \"parent\": \"Devam Et\", \"name\": \"Nose\"},\n" +
-        "     {\"type\": \"BodyTube\", \"parent\": \"Devam Et\", \"name\": \"Body\"},\n" +
-        "     {\"type\": \"TrapezoidFinSet\", \"parent\": \"Body\", \"name\": \"Fins\"},\n" +
-        "     {\"type\": \"Parachute\", \"parent\": \"Body\", \"name\": \"Chute\"}\n" +
-        "   ]}\n\n" +
-        "3. assign_motor\n" +
-        "   Required keys: \"action\": \"assign_motor\", \"component_name\": \"<name_of_bodytube_or_innertube>\", \"motor\": \"<motor_name>\"\n" +
-        "   CRITICAL: Motors MUST be assigned to a BodyTube or InnerTube. NEVER assign a motor to an EngineBlock (an EngineBlock is just a thrust ring, not a motor mount).\n" +
-        "   Default recommendations:\n" +
-        "   - Total length < 0.5m -> A8-3\n" +
-        "   - Total length 0.5-1.0m -> B6-4 or C6-5\n" +
-        "   - Total length > 1.0m -> C6-5 or D12-5\n\n" +
-        "4. plan_and_continue\n" +
-        "   Required keys: \"action\": \"plan_and_continue\", \"message\": \"<your step-by-step plan>\"\n" +
-        "   Use this BEFORE building a complex multi-stage rocket. Output your plan. The system will prompt you to execute the first step, allowing you to build the rocket gradually across multiple iterations.\n\n" +
-        "5. report\n" +
-        "   Required keys: \"action\": \"report\", \"message\": \"<summary of current state or answer to user's question>\"\n" +
-        "   Use this when the user asks a conversational question, asks for the current apogee, or wants a status update without modifying the rocket.\n\n" +
-        "6. finish\n" +
-        "   Required keys: \"action\": \"finish\", \"reason\": \"<explanation>\"\n" +
-        "   Use this when the user's goal has been accomplished.\n\n" +
-        "IMPORTANT:\n" +
-        "- COMPLEX ROCKETS: Do NOT try to add all components of a 2-stage rocket in a single add_components action. First use plan_and_continue, then build it step-by-step (e.g. Stage 1 first, assign motor, then Stage 2).\n" +
-        "- CRITICAL: After add_components, ALWAYS assign_motor to a BodyTube/InnerTube before running simulation. A rocket without a motor will always return 0m apogee.\n" +
-        "- ERROR RULE: If you hit an error, do NOT repeat the same mistake. Read the CURRENT ROCKET COMPONENT TREE, verify the exact names of the existing components, and use ONLY those exact names.\n" +
-        "- LANGUAGE RULE: You must respond, write your reasoning, and output your report message in the EXACT SAME LANGUAGE as the user's prompt (If the user speaks Turkish, you MUST think and reply in Turkish: 'Kullanıcı Türkçe konuşuyor, Türkçe yanıtlamalıyım').\n" +
-        "- CRITICAL REASONING RULE: You are STRICTLY FORBIDDEN from writing long essays in your thinking process. Your reasoning MUST be extremely short (1-3 sentences maximum). DO NOT analyze rules step by step. DO NOT debate with yourself. Decide quickly and output the JSON immediately. If your thinking process exceeds 30 words, you will be penalized.\n" +
-        "- ALWAYS output exactly ONE JSON action block. It must start with { and end with }.\n" +
-        "- DO NOT use LaTeX formatting, markdown math (like $), or unescaped backslashes in the JSON. Keep the text simple.\n" +
-        "- DO NOT output unnecessary text or reasoning outside the JSON block. Act strictly as a JSON API endpoint. Output ONLY the JSON block.\n" +
-        "- /no_think : Do not write long essays. Be concise.\n\n" +
-        "Example output:\n" +
-        "```json\n" +
-        "{\n" +
-        "  \"reasoning\": \"The apogee is low because the rocket is too heavy. I will reduce the body tube length.\",\n" +
-        "  \"action\": \"modify_components\",\n" +
-        "  \"modifications\": [{\"component_name\": \"Body\", \"parameter\": \"length\", \"new_value\": 0.5}]\n" +
-        "}\n" +
-        "```";
+    private String loadSystemPrompt() {
+        try (InputStream is = QwenAgent.class.getResourceAsStream("/ai/system_prompt.txt")) {
+            if (is == null) {
+                return "You are LlamaRocket AI. (Fallback prompt: system_prompt.txt not found)";
+            }
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line).append("\n");
+                }
+                
+                String prompt = sb.toString();
+                // We will dynamically inject motors when building the system message.
+                return prompt;
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            return "You are LlamaRocket AI. (Fallback prompt: error loading system_prompt.txt)";
+        }
+    }
 
-    private final String modelName;
+
+    private String modelName;
     private final String ollamaUrl;
     private final Gson gson;
     private List<JsonObject> messageHistory;
     private final String sessionId;
 
+    public static class AgentStreamResult {
+        private final String thinking;
+        private final String content;
+
+        public AgentStreamResult(String thinking, String content) {
+            this.thinking = thinking != null ? thinking : "";
+            this.content = content != null ? content : "";
+        }
+
+        public String getThinking() {
+            String combinedThinking = thinking;
+            int startIdx = content.indexOf("<thinking>");
+            int endIdx = content.indexOf("</thinking>");
+            if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
+                String extracted = content.substring(startIdx + 10, endIdx).trim();
+                combinedThinking = combinedThinking.isEmpty() ? extracted : combinedThinking + "\n" + extracted;
+            }
+            return combinedThinking;
+        }
+
+        public String getContent() {
+            return content;
+        }
+
+        public String getCombined() {
+            return thinking + content;
+        }
+
+        public String getTextForHistory() {
+            return content.isEmpty() ? getCombined().trim() : content;
+        }
+    }
+
     public interface StreamCallback {
-        void onChunk(String text);
+        void onThinkingChunk(String text);
+        void onContentChunk(String text);
     }
 
     public QwenAgent(String modelName, String ollamaUrl) {
@@ -118,11 +118,26 @@ public class QwenAgent {
         this.ollamaUrl = ollamaUrl;
         this.gson = new GsonBuilder().create();
         this.messageHistory = new ArrayList<>();
-        this.sessionId = "session_" + Instant.now().getEpochSecond();
+        this.sessionId = java.util.UUID.randomUUID().toString();
         
+        // Dynamically get 4-5 motor designations to inject into the prompt
+        String motorExamples = "A8-3, B6-4, C6-5, D12-5"; // Default fallback
+        try {
+            List<? extends Motor> allMotors = Application.getMotorSetDatabase().findMotors(null, null, null, null, Double.NaN, Double.NaN);
+            if (allMotors != null && allMotors.size() >= 4) {
+                motorExamples = allMotors.get(0).getDesignation() + ", " + 
+                                allMotors.get(allMotors.size()/4).getDesignation() + ", " + 
+                                allMotors.get(allMotors.size()/2).getDesignation() + ", " + 
+                                allMotors.get(allMotors.size()-1).getDesignation();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
         JsonObject systemMessage = new JsonObject();
         systemMessage.addProperty("role", "system");
-        systemMessage.addProperty("content", SYSTEM_PROMPT);
+        String finalPrompt = loadSystemPrompt().replace("%MOTORS%", motorExamples);
+        systemMessage.addProperty("content", finalPrompt);
         this.messageHistory.add(systemMessage);
     }
 
@@ -179,7 +194,17 @@ public class QwenAgent {
         }
     }
 
-    public String sendPromptStreaming(StreamCallback callback) throws Exception {
+    private void pruneHistory() {
+        // Keep System Prompt (index 0) and the last 6 messages (3 full turns).
+        int maxHistorySize = 7;
+        while (messageHistory.size() > maxHistorySize) {
+            // Remove the oldest message after the system prompt
+            messageHistory.remove(1);
+        }
+    }
+
+    public AgentStreamResult sendPromptStreaming(StreamCallback callback) throws Exception {
+        pruneHistory();
         URL url = new URL(this.ollamaUrl + "/api/chat");
         HttpURLConnection con = (HttpURLConnection) url.openConnection();
         con.setRequestMethod("POST");
@@ -188,7 +213,7 @@ public class QwenAgent {
         con.setDoOutput(true);
 
         JsonObject payload = new JsonObject();
-        payload.addProperty("model", "qwen3.5:4b");
+        payload.addProperty("model", this.modelName);
         
         JsonArray messagesArr = new JsonArray();
         for (JsonObject msg : this.messageHistory) {
@@ -196,6 +221,7 @@ public class QwenAgent {
         }
         payload.add("messages", messagesArr);
         payload.addProperty("stream", true);
+        payload.addProperty("think", false);
         
         JsonObject options = new JsonObject();
         options.addProperty("num_ctx", 32768);
@@ -212,7 +238,8 @@ public class QwenAgent {
             throw new RuntimeException("Ollama API Error: HTTP " + status);
         }
 
-        StringBuilder fullContent = new StringBuilder();
+        StringBuilder thinking = new StringBuilder();
+        StringBuilder content = new StringBuilder();
         try(BufferedReader br = new BufferedReader(new InputStreamReader(con.getInputStream(), StandardCharsets.UTF_8))) {
             String responseLine;
             while ((responseLine = br.readLine()) != null) {
@@ -220,47 +247,62 @@ public class QwenAgent {
                 JsonObject data = JsonParser.parseString(responseLine).getAsJsonObject();
                 if (data.has("message")) {
                     JsonObject msgObj = data.getAsJsonObject("message");
-                    String chunk = "";
                     if (msgObj.has("thinking")) {
-                        chunk += msgObj.get("thinking").getAsString();
+                        String chunk = msgObj.get("thinking").getAsString();
+                        if (!chunk.isEmpty()) {
+                            thinking.append(chunk);
+                            if (callback != null) {
+                                callback.onThinkingChunk(chunk);
+                            }
+                        }
                     }
                     if (msgObj.has("content")) {
-                        chunk += msgObj.get("content").getAsString();
-                    }
-                    if (!chunk.isEmpty()) {
-                        fullContent.append(chunk);
-                        if (callback != null) {
-                            callback.onChunk(chunk);
+                        String chunk = msgObj.get("content").getAsString();
+                        if (!chunk.isEmpty()) {
+                            content.append(chunk);
+                            if (callback != null) {
+                                callback.onContentChunk(chunk);
+                            }
                         }
                     }
                 }
             }
         }
-        return fullContent.toString();
+        return new AgentStreamResult(thinking.toString(), content.toString());
+    }
+
+    public JsonObject parseAction(QwenAgent.AgentStreamResult result) {
+        if (result == null) {
+            return null;
+        }
+        JsonObject action = parseAction(result.getContent());
+        if (action != null) {
+            return action;
+        }
+        return parseAction(result.getCombined());
     }
 
     public JsonObject parseAction(String responseText) {
-        Pattern pattern = Pattern.compile("```json\\s*(.*?)\\s*```", Pattern.DOTALL);
-        Matcher matcher = pattern.matcher(responseText);
-        String jsonStr = responseText.trim();
+        String jsonStr = responseText;
         
-        if (matcher.find()) {
-            jsonStr = matcher.group(1);
+        // 1. Try to extract from <tool_call> block
+        int startIdx = jsonStr.indexOf("<tool_call>");
+        int endIdx = jsonStr.indexOf("</tool_call>");
+        
+        if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
+            jsonStr = jsonStr.substring(startIdx + 11, endIdx).trim();
         } else {
-            // If no ```json block, find the last occurrence of {"reasoning" or {"action"
-            int start = jsonStr.lastIndexOf("{\"reasoning\"");
-            if (start == -1) start = jsonStr.lastIndexOf("{\"action\"");
-            if (start == -1) start = jsonStr.lastIndexOf("{ \"reasoning\"");
-            if (start == -1) start = jsonStr.lastIndexOf("{ \"action\"");
-            
-            int end = jsonStr.lastIndexOf('}');
-            if (start != -1 && end != -1 && start <= end) {
-                jsonStr = jsonStr.substring(start, end + 1);
+            // Fallback: look for ```json block if <tool_call> is missing
+            Pattern pattern = Pattern.compile("```json\\s*(.*?)\\s*```", Pattern.DOTALL);
+            Matcher matcher = pattern.matcher(jsonStr);
+            if (matcher.find()) {
+                jsonStr = matcher.group(1).trim();
             } else {
-                // Absolute fallback, might break if text contains {
-                start = jsonStr.indexOf('{');
-                if (start != -1 && end != -1 && start <= end) {
-                    jsonStr = jsonStr.substring(start, end + 1);
+                // Absolute fallback: extract first matching curly braces { ... }
+                int firstBrace = jsonStr.indexOf('{');
+                int lastBrace = jsonStr.lastIndexOf('}');
+                if (firstBrace != -1 && lastBrace != -1 && lastBrace >= firstBrace) {
+                    jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
                 }
             }
         }
@@ -271,8 +313,45 @@ public class QwenAgent {
         try {
             return JsonParser.parseString(jsonStr).getAsJsonObject();
         } catch (Exception e) {
+            System.err.println("JSON Parse Error. Raw string was:\n" + jsonStr);
             return null;
         }
+    }
+
+    public void setModelName(String modelName) {
+        this.modelName = modelName;
+    }
+
+    public static List<String> getAvailableModels(String ollamaUrl) {
+        List<String> models = new ArrayList<>();
+        try {
+            URL url = new URL(ollamaUrl + "/api/tags");
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
+            
+            int status = conn.getResponseCode();
+            if (status == 200) {
+                try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), "utf-8"))) {
+                    StringBuilder response = new StringBuilder();
+                    String responseLine = null;
+                    while ((responseLine = br.readLine()) != null) {
+                        response.append(responseLine.trim());
+                    }
+                    JsonObject json = JsonParser.parseString(response.toString()).getAsJsonObject();
+                    JsonArray modelsArray = json.getAsJsonArray("models");
+                    if (modelsArray != null) {
+                        for (JsonElement el : modelsArray) {
+                            models.add(el.getAsJsonObject().get("name").getAsString());
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return models;
     }
 
     public JsonObject getComponentTree(RocketComponent root) {
@@ -322,10 +401,57 @@ public class QwenAgent {
         return null;
     }
 
+    public String getComponentNameList(RocketComponent root) {
+        StringBuilder sb = new StringBuilder();
+        appendComponentNameList(root, sb, 0);
+        return sb.toString().trim();
+    }
+
+    private void appendComponentNameList(RocketComponent component, StringBuilder sb, int depth) {
+        for (int i = 0; i < depth; i++) {
+            sb.append("  ");
+        }
+        sb.append("- name: \"").append(component.getName())
+          .append("\" (Type: ").append(component.getClass().getSimpleName()).append(")\n");
+        for (RocketComponent child : component.getChildren()) {
+            appendComponentNameList(child, sb, depth + 1);
+        }
+    }
+
+    public boolean isSupportedComponentType(String type) {
+        if (type == null) {
+            return false;
+        }
+        switch (type) {
+            case "AxialStage":
+            case "NoseCone":
+            case "BodyTube":
+            case "TrapezoidFinSet":
+            case "InnerTube":
+            case "EngineBlock":
+            case "Parachute":
+            case "ShockCord":
+            case "Transition":
+            case "MassComponent":
+                return true;
+            default:
+                return false;
+        }
+    }
+
     public void modifyComponent(Rocket rocket, String componentName, String parameter, double newValue) throws Exception {
         RocketComponent comp = findComponentByName(rocket, componentName);
         if (comp == null) throw new Exception("Component not found: " + componentName);
+        if (comp instanceof Rocket || comp instanceof info.openrocket.core.rocketcomponent.AxialStage) {
+            throw new Exception("Cannot modify a Stage or Rocket container. Use add_components to add parts to \"" + componentName + "\".");
+        }
         
+        parameter = parameter.replace("_", "");
+        if (comp instanceof info.openrocket.core.rocketcomponent.NoseCone && parameter.equalsIgnoreCase("outerradius")) {
+            ((info.openrocket.core.rocketcomponent.NoseCone) comp).setBaseRadius(newValue);
+            return;
+        }
+
         String setterName = "set" + parameter.substring(0, 1).toUpperCase() + parameter.substring(1).toLowerCase();
         Method setter = null;
         
@@ -344,29 +470,80 @@ public class QwenAgent {
 
     public void addComponent(Rocket rocket, String parentName, String type, String name) throws Exception {
         RocketComponent parent = findComponentByName(rocket, parentName);
-        if (parent == null) throw new Exception("Parent component not found: " + parentName);
+        if (parent == null) throw new Exception("Parent component not found: " + parentName + ". Use EXACT names from the tree.");
+
+        if ("NoseCone".equals(type) && !(parent instanceof AxialStage)) {
+            throw new Exception("NoseCone can only attach to an AxialStage.");
+        }
 
         RocketComponent newComp = null;
         switch (type) {
+            case "AxialStage": newComp = new AxialStage(); break;
             case "NoseCone": newComp = new NoseCone(); break;
             case "BodyTube": newComp = new BodyTube(); break;
             case "TrapezoidFinSet": newComp = new TrapezoidFinSet(); break;
             case "InnerTube": newComp = new InnerTube(); break;
             case "EngineBlock": newComp = new EngineBlock(); break;
             case "Parachute": newComp = new Parachute(); break;
-            default: throw new Exception("Unsupported component type: " + type);
+            case "ShockCord": newComp = new ShockCord(); break;
+            case "Transition": newComp = new Transition(); break;
+            case "MassComponent": newComp = new MassComponent(); break;
+            default: throw new Exception("Unsupported component type: " + type + ". Supported: AxialStage, NoseCone, BodyTube, TrapezoidFinSet, InnerTube, EngineBlock, Parachute, ShockCord, Transition, MassComponent.");
         }
 
         if (name != null && !name.isEmpty()) {
+            if (findComponentByName(rocket, name) != null) {
+                throw new Exception("A component with the name '" + name + "' already exists! You MUST provide a UNIQUE name.");
+            }
             newComp.setName(name);
+        } else {
+            throw new Exception("You MUST provide a 'name' for the new component.");
+        }
+
+        if (!parent.isCompatible(newComp)) {
+            throw new Exception(describeAddCompatibilityError(type, parentName, parent));
         }
         
         parent.addChild(newComp);
+        if (newComp instanceof info.openrocket.core.rocketcomponent.NoseCone) {
+            parent.moveChild(newComp, 0);
+        }
         
         if (newComp instanceof info.openrocket.core.rocketcomponent.FinSet) {
             newComp.setAxialMethod(info.openrocket.core.rocketcomponent.position.AxialMethod.BOTTOM);
             newComp.setAxialOffset(0.0);
         }
+    }
+
+    private boolean hasExistingNoseCone(RocketComponent current) {
+        if (current instanceof NoseCone) {
+            return true;
+        }
+        for (RocketComponent child : current.getChildren()) {
+            if (hasExistingNoseCone(child)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String describeAddCompatibilityError(String type, String parentName, RocketComponent parent) {
+        String parentKind = parent.getClass().getSimpleName();
+        if ("NoseCone".equals(type) || "BodyTube".equals(type)) {
+            return type + " cannot attach to \"" + parentName + "\" (" + parentKind + "). Parent must be an AxialStage — never a BodyTube.";
+        }
+        if ("AxialStage".equals(type)) {
+            return "AxialStage must attach to the Rocket root, not \"" + parentName + "\" (" + parentKind + ").";
+        }
+        return type + " cannot attach to \"" + parentName + "\" (" + parentKind + "). Parent must be a BodyTube.";
+    }
+    
+    public void deleteComponent(Rocket rocket, String componentName) throws Exception {
+        RocketComponent comp = findComponentByName(rocket, componentName);
+        if (comp == null) throw new Exception("Not found: " + componentName);
+        if (comp instanceof Rocket) throw new Exception("Cannot delete the rocket root: " + componentName);
+        if (comp.getParent() == null) throw new Exception("Cannot delete component with no parent: " + componentName);
+        comp.getParent().removeChild(comp);
     }
     
     public void assignMotor(Rocket rocket, String componentName, String motorDesignation) throws Exception {
@@ -376,7 +553,7 @@ public class QwenAgent {
             throw new Exception("Component is not a motor mount. Use a BodyTube or InnerTube.");
         }
         
-        String baseDesignation = motorDesignation;
+        String baseDesignation = motorDesignation.trim();
         double delay = 0.0;
         if (motorDesignation.contains("-")) {
             String[] parts = motorDesignation.split("-");
@@ -388,23 +565,36 @@ public class QwenAgent {
             }
         }
         
-        List<? extends Motor> motors = Application.getMotorSetDatabase().findMotors(null, null, null, baseDesignation, Double.NaN, Double.NaN);
+        List<? extends Motor> motors = Application.getMotorSetDatabase().findMotors(null, null, null, motorDesignation.trim(), Double.NaN, Double.NaN);
         if (motors.isEmpty()) {
-            throw new Exception("Motor not found in database: " + baseDesignation);
+            motors = Application.getMotorSetDatabase().findMotors(null, null, null, baseDesignation, Double.NaN, Double.NaN);
+        }
+        if (motors.isEmpty()) {
+            throw new Exception("Motor not found: " + motorDesignation + ". Use A8-3, B6-4, C6-5, or D12-5.");
         }
         
-        Motor motor = motors.get(0); // Pick the first match
+        Motor motor = motors.get(0);
         MotorMount mount = (MotorMount) comp;
         mount.setMotorMount(true);
-        info.openrocket.core.rocketcomponent.FlightConfigurationId fcid = info.openrocket.core.rocketcomponent.FlightConfigurationId.DEFAULT_VALUE_FCID;
-        MotorConfiguration newConfig = new MotorConfiguration(mount, fcid);
-        newConfig.setMotor(motor);
-        if (delay > 0) {
-            newConfig.setEjectionDelay(delay);
-        }
-        mount.setMotorConfig(newConfig, fcid);
+        info.openrocket.core.rocketcomponent.FlightConfigurationId fcid = rocket.getSelectedConfiguration().getId();
         
-        // Let OpenRocket's internal update mechanisms handle the flight configuration
+        if (fcid.equals(info.openrocket.core.rocketcomponent.FlightConfigurationId.DEFAULT_VALUE_FCID)) {
+            fcid = new info.openrocket.core.rocketcomponent.FlightConfigurationId();
+            rocket.createFlightConfiguration(fcid);
+            rocket.getFlightConfiguration(fcid).setName("[" + motorDesignation + "]");
+            rocket.setSelectedConfiguration(fcid);
+        }
+
+        MotorConfiguration targetConfig = new MotorConfiguration(mount, fcid, mount.getDefaultMotorConfig());
+        mount.setMotorConfig(targetConfig, fcid);
+        
+        targetConfig.setMotor(motor);
+        if (delay > 0) {
+            targetConfig.setEjectionDelay(delay);
+        }
+        
+        rocket.getFlightConfiguration(fcid).addMotor(targetConfig);
+
         info.openrocket.core.rocketcomponent.FlightConfiguration config = rocket.getFlightConfiguration(fcid);
         config.update(); // Re-evaluates active motors
         

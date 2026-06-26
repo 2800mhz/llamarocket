@@ -334,6 +334,8 @@ public class MotorConfigurationPanel extends FlightConfigurablePanel<MotorMount>
 						newConfig.setMotor(mtr);
 						newConfig.setEjectionDelay(d);
 						mount.setMotorConfig(newConfig, fcId);
+						rocket.createFlightConfiguration(fcId);
+						rocket.getFlightConfiguration(fcId).addMotor(newConfig);
 					}
 				}
 			}
