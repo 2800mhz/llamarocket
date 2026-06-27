@@ -1,6 +1,6 @@
-# 🚀LlamaRocket
+# 🚀 LlamaRocket (QwenRocket)
 
-**QwenRocket** (formerly known as LlamaRocket) is an AI-Enhanced fork of the OpenRocket simulator. It features an integrated AI Assistant powered by local LLMs (Qwen/Llama) to help you design, optimize, and simulate multi-stage rockets through natural language prompts.
+**QwenRocket** (formerly known as LlamaRocket) is an AI-Enhanced fork of the OpenRocket simulator. It features an integrated AI Assistant powered by local LLMs (Qwen/Llama/Gemma) to help you design, optimize, and simulate multi-stage rockets through natural language prompts.
 
 ![Qwen Assistant Interface](qwen-panel.png)
 
@@ -13,38 +13,38 @@
 
 ---
 
-## 📋 Yol Haritası / Yapılacaklar Listesi (To-Do List)
+## 📋 Roadmap / To-Do List
 
-Aşağıda projenin mevcut durumu ve gelecekte eklenecek özelliklerin bir listesi bulunmaktadır:
+Below is the current status of the project and a list of features to be added in the future:
 
-- [x] **Temel AI Entegrasyonu:** OpenRocket UI içine Qwen/Llama sohbet panelinin (Qwen Assistant Panel) eklenmesi.
-- [x] **Parça Ekleme/Çıkarma:** Promptlar aracılığıyla roket ağacına (component tree) müdahale.
-- [x] **Motor Atama:** Yapay zekanın roket aşamalarına uygun motorları seçip simülasyonu otomatik çalıştırması.
-- [x] **Hata Yakalama (Debug & Self-Correction):** Yanlış motor seçimi veya geçersiz isimlerde sistemin hatayı tespit edip, AI'ın döngü içinde kendi kendini düzeltmesi.
-- [x] **Çoklu Dil Desteği:** Asistanın JSON formatlama şablonlarına dil kurallarının gömülmesiyle, kullanıcının komut diline (örneğin tamamen Türkçe) kusursuz adapte olması.
-- [x] **Otonom Test ve Raporlama (Anti-Loop):** Ulaşılamaz sayısal hedeflerde (örn. tam 500m apogee) yapay zekanın sonsuz motor deneme döngüsüne girmeyip, durumu analiz edip mantıklı raporlar ve yapısal değişiklik önerileri sunması.
-- [ ] **Gelişmiş Optimizasyon:** Ağırlık merkezi (CG) ve basınç merkezi (CP) optimizasyonu için AI destekli otonom aerodinamik düzeltmeler (kütle ekleme, kanat kırpma, gövde boyu değiştirme).
-- [ ] **Özelleştirilmiş LLM Modelleri:** Roket bilimi ve aerodinamik için özel fine-tune edilmiş hafif lokal modellerin (LoRA) entegrasyonu.
+- [x] **Basic AI Integration:** Integration of the Qwen/Llama/Gemma chat panel (Qwen Assistant Panel) into the OpenRocket UI.
+- [x] **Component Addition/Removal:** Direct manipulation of the rocket component tree via natural language prompts.
+- [x] **Motor Assignment:** AI autonomously selects appropriate motors for rocket stages and runs simulations automatically.
+- [x] **Error Catching (Debug & Self-Correction):** The system detects errors such as invalid motor selections or invalid component names, allowing the AI to self-correct within its loop.
+- [x] **Multi-Language Support:** By embedding language rules directly into the JSON formatting templates, the assistant perfectly adapts to the user's command language (e.g., fully supporting Turkish or English).
+- [x] **Autonomous Testing and Reporting (Anti-Loop):** When numerical targets are unreachable (e.g., exactly 500m apogee), the AI avoids entering infinite motor-testing loops. Instead, it analyzes the situation, provides logical reports, and suggests structural changes.
+- [ ] **Advanced Optimization:** AI-assisted autonomous aerodynamic corrections for Center of Gravity (CG) and Center of Pressure (CP) optimization (e.g., adding mass, clipping fins, altering body tube length).
+- [ ] **Customized LLM Models:** Integration of specialized, fine-tuned lightweight local models (LoRA) optimized for rocketry and aerodynamics.
 
-### 🌟 Son Güncellemeler (Bugünün Başarıları)
-- **Akıllı Döngü Yönetimi:** Local AI modellerin takılıp kalma sorununu aşan `Anti-Loop` kuralı başarıyla entegre edildi.
-- **Sadece-Okunur (Read-Only) Mod Desteği:** Kullanıcı sadece "analiz et", "incele" gibi komutlar verdiğinde roket mimarisine hiçbir şekilde dokunmadan sadece durum tespiti yapabilen ve bunu Türkçe özetleyen stabil bir yapı kuruldu.
-- **Modern Arayüz ve Gemma Entegrasyonu:** Asistan arayüzünün (UI) fontları modernize edildi (Segoe UI) ve varsayılan yapay zeka modeli olarak `Gemma` modellerini otomatik tanıyacak şekilde ayarlandı.
+### 🌟 Recent Updates (Today's Achievements)
+- **Smart Loop Management:** The `Anti-Loop` rule was successfully integrated to overcome the tendency of local AI models to get stuck in infinite optimization loops.
+- **Read-Only Mode Support:** When the user issues commands like "analyze" or "examine", the system enters a stable state where it makes zero modifications to the rocket architecture and simply reports the current status in the user's language.
+- **Modern Interface & Gemma Integration:** The assistant UI fonts were modernized (Segoe UI), margins were improved, and the code was updated to automatically detect and default to `Gemma` AI models.
 
 ---
 
-## 🛠️ Kurulum & Kullanım (Getting Started)
+## 🛠️ Getting Started
 
-1. **Ollama Kurulumu:** Bilgisayarınıza [Ollama](https://ollama.com) kurun ve `qwen` veya uygun bir model indirin (`ollama run qwen`).
-2. **Projeyi Derleyin:** 
+1. **Install Ollama:** Install [Ollama](https://ollama.com) on your computer and download `qwen` or `gemma` (`ollama run gemma4:e4b` or `ollama run qwen`).
+2. **Build the Project:** 
    ```bash
    ./gradlew build
    ```
-3. **Çalıştırın:**
+3. **Run the Application:**
    ```bash
    ./gradlew swing:run
    ```
-4. **AI Asistanı Kullanın:** Sağ panelde açılan sekmeden roketiniz hakkında komutlar vermeye başlayın. (Örn: "Birinci aşamaya C6-5 motoru ekle ve simülasyonu çalıştır.")
+4. **Use the AI Assistant:** Open the side panel and start issuing commands about your rocket. (e.g., "Add a C6-5 motor to the first stage and run the simulation.")
 
-## 📜 Lisans
-OpenRocket is proudly open-source under the [GNU GPL](https://www.gnu.org/licenses/gpl-3.0.en.html) license. 
+## 📜 License
+OpenRocket is proudly open-source under the [GNU GPL](https://www.gnu.org/licenses/gpl-3.0.en.html) license.
