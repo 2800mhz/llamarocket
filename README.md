@@ -20,11 +20,16 @@ Aşağıda projenin mevcut durumu ve gelecekte eklenecek özelliklerin bir liste
 - [x] **Temel AI Entegrasyonu:** OpenRocket UI içine Qwen/Llama sohbet panelinin (Qwen Assistant Panel) eklenmesi.
 - [x] **Parça Ekleme/Çıkarma:** Promptlar aracılığıyla roket ağacına (component tree) müdahale.
 - [x] **Motor Atama:** Yapay zekanın roket aşamalarına uygun motorları seçip simülasyonu otomatik çalıştırması.
-- [x] **Hata Yakalama (Debug):** Eksik parçaların (örn. burun konisi veya faydalı yük bölümü) tespit edilip kullanıcı müdahalesi olmadan AI tarafından eklenmesi.
-- [ ] **Gelişmiş Optimizasyon:** Ağırlık merkezi (CG) ve basınç merkezi (CP) optimizasyonu için AI destekli aerodinamik düzeltmeler.
-- [ ] **Çoklu Dil Desteği:** Asistanın Türkçe dışında diğer dillerde de (İngilizce vb.) tamamen kararlı çalışmasının sağlanması.
+- [x] **Hata Yakalama (Debug & Self-Correction):** Yanlış motor seçimi veya geçersiz isimlerde sistemin hatayı tespit edip, AI'ın döngü içinde kendi kendini düzeltmesi.
+- [x] **Çoklu Dil Desteği:** Asistanın JSON formatlama şablonlarına dil kurallarının gömülmesiyle, kullanıcının komut diline (örneğin tamamen Türkçe) kusursuz adapte olması.
+- [x] **Otonom Test ve Raporlama (Anti-Loop):** Ulaşılamaz sayısal hedeflerde (örn. tam 500m apogee) yapay zekanın sonsuz motor deneme döngüsüne girmeyip, durumu analiz edip mantıklı raporlar ve yapısal değişiklik önerileri sunması.
+- [ ] **Gelişmiş Optimizasyon:** Ağırlık merkezi (CG) ve basınç merkezi (CP) optimizasyonu için AI destekli otonom aerodinamik düzeltmeler (kütle ekleme, kanat kırpma, gövde boyu değiştirme).
 - [ ] **Özelleştirilmiş LLM Modelleri:** Roket bilimi ve aerodinamik için özel fine-tune edilmiş hafif lokal modellerin (LoRA) entegrasyonu.
-- [ ] **Otonom Test ve Raporlama:** Roket uçuş profillerinin otomatik test edilmesi ve raporlanması.
+
+### 🌟 Son Güncellemeler (Bugünün Başarıları)
+- **Akıllı Döngü Yönetimi:** Local AI modellerin takılıp kalma sorununu aşan `Anti-Loop` kuralı başarıyla entegre edildi.
+- **Sadece-Okunur (Read-Only) Mod Desteği:** Kullanıcı sadece "analiz et", "incele" gibi komutlar verdiğinde roket mimarisine hiçbir şekilde dokunmadan sadece durum tespiti yapabilen ve bunu Türkçe özetleyen stabil bir yapı kuruldu.
+- **Modern Arayüz ve Gemma Entegrasyonu:** Asistan arayüzünün (UI) fontları modernize edildi (Segoe UI) ve varsayılan yapay zeka modeli olarak `Gemma` modellerini otomatik tanıyacak şekilde ayarlandı.
 
 ---
 

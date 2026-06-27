@@ -77,14 +77,17 @@ public class QwenAssistantPanel extends JPanel {
         
         List<String> availableModels = QwenAgent.getAvailableModels(ollamaUrl);
         if (availableModels.isEmpty()) {
-            modelSelector.addItem("qwen3.5:4b"); // fallback
+            modelSelector.addItem("gemma4:e4b"); // fallback
         } else {
             for (String m : availableModels) {
                 modelSelector.addItem(m);
             }
-            // Set qwen3.5:4b as default if it exists
-            if (availableModels.contains("qwen3.5:4b")) {
-                modelSelector.setSelectedItem("qwen3.5:4b");
+            // Set a gemma model as default if it exists
+            for (String m : availableModels) {
+                if (m.toLowerCase().contains("gemma")) {
+                    modelSelector.setSelectedItem(m);
+                    break;
+                }
             }
         }
         
@@ -106,7 +109,8 @@ public class QwenAssistantPanel extends JPanel {
         chatArea.setEditable(false);
         chatArea.setLineWrap(true);
         chatArea.setWrapStyleWord(true);
-        chatArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
+        chatArea.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+        chatArea.setMargin(new Insets(10, 10, 10, 10));
         
         // Auto-scroll to bottom
         DefaultCaret caret = (DefaultCaret) chatArea.getCaret();
@@ -119,7 +123,8 @@ public class QwenAssistantPanel extends JPanel {
         thinkingArea.setEditable(false);
         thinkingArea.setLineWrap(true);
         thinkingArea.setWrapStyleWord(true);
-        thinkingArea.setFont(new Font("Monospaced", Font.PLAIN, 11));
+        thinkingArea.setFont(new Font("Segoe UI", Font.ITALIC, 12));
+        thinkingArea.setMargin(new Insets(8, 8, 8, 8));
         thinkingArea.setForeground(new Color(120, 120, 120));
         thinkingScrollPane = new JScrollPane(thinkingArea);
         thinkingScrollPane.setPreferredSize(new Dimension(0, 120));
