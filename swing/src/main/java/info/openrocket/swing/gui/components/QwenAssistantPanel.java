@@ -1,5 +1,6 @@
 package info.openrocket.swing.gui.components;
 
+import info.openrocket.core.ai.LlamaRocketAgent;
 import info.openrocket.core.ai.QwenAgent;
 import info.openrocket.core.document.OpenRocketDocument;
 import info.openrocket.core.document.Simulation;
@@ -36,7 +37,7 @@ import java.util.Map;
 
 public class QwenAssistantPanel extends JPanel {
 
-    private QwenAgent agent;
+    private LlamaRocketAgent agent;
     private JTextArea chatArea;
     private JTextField inputField;
     private JButton sendButton;
@@ -47,10 +48,13 @@ public class QwenAssistantPanel extends JPanel {
     private JScrollPane thinkingScrollPane;
     private JLabel statusLabel;
     private JButton saveButton;
+    private JComboBox<String> modelSelector;
     private BasicFrame basicFrame;
     private boolean isThinking = false;
     
     private String ollamaUrl = "http://localhost:11434";
+    private QwenAgent.Provider provider = QwenAgent.Provider.OLLAMA;
+    private String cloudApiKey = "";
     private int maxIterations = 10;
 
     public QwenAssistantPanel(BasicFrame parent, OpenRocketDocument document) {
@@ -59,7 +63,7 @@ public class QwenAssistantPanel extends JPanel {
         this.document = document;
         
         // The agent initially has no model, we will set it from the combobox
-        this.agent = new QwenAgent("", ollamaUrl);
+        this.agent = new LlamaRocketAgent("", ollamaUrl);
         this.agent.loadHistory(document.getQwenChatHistory());
 
         initUI();
@@ -70,24 +74,32 @@ public class QwenAssistantPanel extends JPanel {
 
         JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         topPanel.add(new JLabel("Model:"));
-        JComboBox<String> modelSelector = new JComboBox<>();
+        modelSelector = new JComboBox<>();
+        modelSelector.setEditable(true);
         
         JButton settingsButton = new JButton("\u2699 Settings");
         settingsButton.addActionListener(e -> showSettingsDialog());
+		JButton pullModelButton = new JButton("Pull Model");
+		pullModelButton.addActionListener(e -> pullModel());
         
-        List<String> availableModels = QwenAgent.getAvailableModels(ollamaUrl);
+        List<String> availableModels = LlamaRocketAgent.getAvailableModels(ollamaUrl);
         if (availableModels.isEmpty()) {
             modelSelector.addItem("gemma4:e4b"); // fallback
         } else {
             for (String m : availableModels) {
                 modelSelector.addItem(m);
             }
-            // Set a gemma model as default if it exists
+            // Prefer the proven local default, then any Gemma model. All installed Ollama
+            // models (including every Llama family model) remain selectable.
+            if (availableModels.contains("gemma4:e4b")) {
+                modelSelector.setSelectedItem("gemma4:e4b");
+            } else {
             for (String m : availableModels) {
                 if (m.toLowerCase().contains("gemma")) {
                     modelSelector.setSelectedItem(m);
                     break;
                 }
+            }
             }
         }
         
@@ -102,6 +114,7 @@ public class QwenAssistantPanel extends JPanel {
         });
         
         topPanel.add(modelSelector);
+		topPanel.add(pullModelButton);
         topPanel.add(settingsButton);
         add(topPanel, BorderLayout.NORTH);
 
@@ -177,7 +190,7 @@ public class QwenAssistantPanel extends JPanel {
         saveButton = new JButton("Export Session");
         saveButton.addActionListener(e -> {
             try {
-                File dir = Paths.get(System.getProperty("user.home"), "qwenrocket-sessions").toFile();
+                File dir = Paths.get(System.getProperty("user.home"), "llamarocket-sessions").toFile();
                 if (!dir.exists()) dir.mkdirs();
                 
                 File exportFile = new File(dir, "exported_session_" + System.currentTimeMillis() + ".jsonl");
@@ -220,6 +233,10 @@ public class QwenAssistantPanel extends JPanel {
         }
         if (document.getQwenChatHistory() == null || document.getQwenChatHistory().size() <= 1) {
             appendChat("System", "LlamaRocket AI initialized.\nReady for commands! (e.g. 'Increase the apogee to 55m')\n");
+			String startupError = LlamaRocketAgent.getOllamaStartupError();
+			if (startupError != null) {
+				appendChat("System", startupError + " Install/start Ollama, then use Settings or retry your message.");
+			}
         }
     }
     
@@ -227,26 +244,45 @@ public class QwenAssistantPanel extends JPanel {
         JDialog dialog = new JDialog((Frame) SwingUtilities.getWindowAncestor(this), "LlamaRocket Settings", true);
         dialog.setLayout(new BorderLayout());
         
-        JPanel formPanel = new JPanel(new GridLayout(2, 2, 5, 5));
+        JPanel formPanel = new JPanel(new GridLayout(5, 2, 5, 5));
         formPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
         
         JTextField urlField = new JTextField(this.ollamaUrl);
         JTextField iterField = new JTextField(String.valueOf(this.maxIterations));
+        JComboBox<QwenAgent.Provider> providerField = new JComboBox<>(QwenAgent.Provider.values());
+        providerField.setSelectedItem(this.provider);
+        JPasswordField apiKeyField = new JPasswordField(this.cloudApiKey);
         
-        formPanel.add(new JLabel("Ollama URL:"));
+        formPanel.add(new JLabel("Provider:"));
+        formPanel.add(providerField);
+        formPanel.add(new JLabel("Base URL:"));
         formPanel.add(urlField);
+        formPanel.add(new JLabel("API Key (session only):"));
+        formPanel.add(apiKeyField);
         formPanel.add(new JLabel("Max Iterations:"));
         formPanel.add(iterField);
+        formPanel.add(new JLabel("Model:"));
+        formPanel.add(new JLabel("Select/type it in the top model box"));
+
+		providerField.addActionListener(e -> {
+			QwenAgent.Provider selected = (QwenAgent.Provider) providerField.getSelectedItem();
+			if (selected != null && selected != QwenAgent.Provider.OPENAI_COMPATIBLE) {
+				urlField.setText(selected.getDefaultUrl());
+			}
+		});
         
         JButton saveBtn = new JButton("Save");
         saveBtn.addActionListener(e -> {
-            this.ollamaUrl = urlField.getText();
+            this.provider = (QwenAgent.Provider) providerField.getSelectedItem();
+            this.ollamaUrl = urlField.getText().trim();
+            this.cloudApiKey = new String(apiKeyField.getPassword()).trim();
+			if (this.cloudApiKey.isEmpty()) this.cloudApiKey = environmentKey(this.provider);
+            this.agent.configureProvider(this.provider, this.ollamaUrl, this.cloudApiKey);
             try {
                 this.maxIterations = Integer.parseInt(iterField.getText());
             } catch (NumberFormatException ignored) {}
             
-            // Re-fetch models
-            JComboBox<String> selector = (JComboBox<String>) ((JPanel) getComponent(0)).getComponent(1); // very brittle, better to reload
+			configureModelSelectorForProvider();
             dialog.dispose();
         });
         
@@ -256,6 +292,76 @@ public class QwenAssistantPanel extends JPanel {
         dialog.setLocationRelativeTo(this);
         dialog.setVisible(true);
     }
+
+	private void pullModel() {
+		if (provider != QwenAgent.Provider.OLLAMA) {
+			JOptionPane.showMessageDialog(this, "Cloud models are selected by typing their model ID in the model box.");
+			return;
+		}
+		String requested = JOptionPane.showInputDialog(this,
+				"Ollama model name (for example llama3.2 or gemma4:e4b):",
+				"Pull Ollama Model", JOptionPane.PLAIN_MESSAGE);
+		if (requested == null || requested.isBlank()) return;
+		String model = requested.trim();
+		setStatus("Pulling " + model + "...");
+		new Thread(() -> {
+			try {
+				LlamaRocketAgent.pullModel(ollamaUrl, model);
+				SwingUtilities.invokeLater(() -> {
+					refreshModels(model);
+					appendChat("System", "Model ready: " + model);
+					setStatus("");
+				});
+			} catch (Exception ex) {
+				SwingUtilities.invokeLater(() -> {
+					appendChat("Error", ex.getMessage());
+					setStatus("");
+				});
+			}
+		}, "llamarocket-model-pull").start();
+	}
+
+	private String environmentKey(QwenAgent.Provider selected) {
+		if (selected == null) return "";
+		String variable = switch (selected) {
+			case OPENROUTER -> "OPENROUTER_API_KEY";
+			case NVIDIA_NIM -> "NVIDIA_API_KEY";
+			case MINIMAX -> "MINIMAX_API_KEY";
+			default -> "";
+		};
+		String value = variable.isEmpty() ? null : System.getenv(variable);
+		return value != null ? value : "";
+	}
+
+	private void configureModelSelectorForProvider() {
+		if (provider == QwenAgent.Provider.OLLAMA) {
+			refreshModels(null);
+			return;
+		}
+		String suggested = switch (provider) {
+			case NVIDIA_NIM -> "nvidia/llama-3.3-nemotron-super-49b-v1";
+			case MINIMAX -> "MiniMax-M2.7";
+			case OPENROUTER -> "nvidia/llama-3.3-nemotron-super-49b-v1.5";
+			default -> "";
+		};
+		if (!suggested.isEmpty()) {
+			modelSelector.setSelectedItem(suggested);
+			agent.setModelName(suggested);
+		}
+		appendChat("System", "Provider changed to " + provider + ". API keys are kept in memory only.");
+	}
+
+	private void refreshModels(String preferredModel) {
+		List<String> models = LlamaRocketAgent.getAvailableModels(ollamaUrl);
+		if (models.isEmpty()) return;
+		Object previous = modelSelector.getSelectedItem();
+		modelSelector.removeAllItems();
+		for (String model : models) modelSelector.addItem(model);
+		String selection = preferredModel != null && models.contains(preferredModel)
+				? preferredModel : previous instanceof String && models.contains(previous) ? (String) previous : models.get(0);
+		modelSelector.setSelectedItem(selection);
+		agent.setModelName(selection);
+	}
 
     private void appendChat(String role, String text) {
         SwingUtilities.invokeLater(() -> {
@@ -335,14 +441,147 @@ public class QwenAssistantPanel extends JPanel {
         return sb.toString();
     }
 
-    private void appendMotorStatus(RocketComponent component, StringBuilder sb, int depth) {
+	private boolean isTurkish(String text) {
+		String lower = text.toLowerCase(new Locale("tr", "TR"));
+		return lower.matches(".*[çğıöşü].*") || lower.matches(".*\\b(abi|bana|bir|bi|roket|metre|tasarla|neler|nedir|durum|incele|analiz|anlat|yapabilir|uçuş|apoj|apogee)\\b.*");
+	}
+
+	private boolean isReadOnlyRequest(String text) {
+		String lower = text.toLowerCase(new Locale("tr", "TR"));
+		return lower.matches(".*\\b(neler yapabilir|ne yapabilir|durum ne|incele|analiz et|raporla|anlat|açıkla|what can|analyze|inspect|report|explain)\\b.*") &&
+				!lower.matches(".*\\b(değiştir|ayarla|ekle|sil|tasarla|optimize|yükselt|düşür|modify|change|add|delete|design|optimize)\\b.*");
+	}
+
+	private double parsePayloadMassKg(String text) {
+		java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(
+				"(?i)(\\d+(?:[.,]\\d+)?)\\s*(kg|kilogram|g|gr|gram)\\s*(?:faydal[ıi]\\s*y[üu]k|payload)?|" +
+				"(?:faydal[ıi]\\s*y[üu]k|payload)\\s*(?:olarak|:)?\\s*(\\d+(?:[.,]\\d+)?)\\s*(kg|kilogram|g|gr|gram)")
+				.matcher(text);
+		if (!matcher.find()) return 0.0;
+		String number = matcher.group(1) != null ? matcher.group(1) : matcher.group(3);
+		String unit = matcher.group(2) != null ? matcher.group(2) : matcher.group(4);
+		double value = Double.parseDouble(number.replace(',', '.'));
+		return unit.toLowerCase(Locale.ROOT).startsWith("k") ? value : value / 1000.0;
+	}
+
+	private double parseTargetApogeeMeters(String text) {
+		java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(
+				"(?i)(\\d+(?:[.,]\\d+)?)\\s*(m|metre|meter)\\s*(?:apogee|apoj)|" +
+				"(?:apogee|apoj)\\s*(?:hedefi|:)?\\s*(\\d+(?:[.,]\\d+)?)\\s*(m|metre|meter)")
+				.matcher(text);
+		if (!matcher.find()) return Double.NaN;
+		String number = matcher.group(1) != null ? matcher.group(1) : matcher.group(3);
+		return Double.parseDouble(number.replace(',', '.'));
+	}
+
+	private RocketComponent findFirstMotorMount(RocketComponent component) {
+		if (component instanceof MotorMount) return component;
+		for (RocketComponent child : component.getChildren()) {
+			RocketComponent found = findFirstMotorMount(child);
+			if (found != null) return found;
+		}
+		return null;
+	}
+
+	private JsonObject optimizeMotorForApogee(Rocket rocket, double targetMeters) throws Exception {
+		RocketComponent mountComponent = findFirstMotorMount(rocket);
+		if (!(mountComponent instanceof MotorMount)) throw new IllegalStateException("No motor mount found.");
+		double maxDiameter = mountComponent instanceof info.openrocket.core.rocketcomponent.InnerTube tube
+				? tube.getInnerRadius() * 2.0 + 0.0002 : 0.030;
+		List<? extends Motor> all = Application.getMotorSetDatabase()
+				.findMotors(null, null, null, null, Double.NaN, Double.NaN);
+		java.util.Map<String, Motor> unique = new java.util.TreeMap<>();
+		for (Motor motor : all) {
+			double impulse = motor.getTotalImpulseEstimate();
+			if (motor.getDiameter() <= maxDiameter && Double.isFinite(impulse) && impulse > 1.0 && impulse <= 160.0)
+				unique.putIfAbsent(motor.getDesignation(), motor);
+		}
+		List<Motor> sorted = new java.util.ArrayList<>(unique.values());
+		sorted.sort(java.util.Comparator.comparingDouble(Motor::getTotalImpulseEstimate));
+		if (sorted.isEmpty()) throw new IllegalStateException("No compatible motors found for mount diameter " + maxDiameter + " m.");
+
+		List<Motor> candidates = new java.util.ArrayList<>();
+		int limit = Math.min(24, sorted.size());
+		for (int i = 0; i < limit; i++) {
+			int index = limit == 1 ? 0 : (int) Math.round(i * (sorted.size() - 1.0) / (limit - 1.0));
+			Motor candidate = sorted.get(index);
+			if (!candidates.contains(candidate)) candidates.add(candidate);
+		}
+
+		String bestMotor = null;
+		double bestApogee = Double.NaN;
+		double bestError = Double.POSITIVE_INFINITY;
+		JsonArray trials = new JsonArray();
+		for (Motor candidate : candidates) {
+			String designation = candidate.getDesignation();
+			try {
+				SwingUtilities.invokeAndWait(() -> {
+					try { agent.assignMotor(rocket, mountComponent.getID().toString(), designation); }
+					catch (Exception e) { throw new RuntimeException(e); }
+				});
+				JsonObject simulation = runSimulation();
+				double apogee = jsonDouble(simulation, "apogee_meters");
+				if (!Double.isFinite(apogee) || apogee <= 0) continue;
+				double error = Math.abs(apogee - targetMeters);
+				JsonObject trial = new JsonObject();
+				trial.addProperty("motor", designation);
+				trial.addProperty("apogee_m", apogee);
+				trials.add(trial);
+				if (error < bestError) {
+					bestError = error;
+					bestApogee = apogee;
+					bestMotor = designation;
+				}
+			} catch (Exception ignored) {
+				// Incompatible database variants are skipped.
+			}
+		}
+		if (bestMotor == null) throw new IllegalStateException("Compatible motors produced no valid flight.");
+		final String selectedMotor = bestMotor;
+		SwingUtilities.invokeAndWait(() -> {
+			try { agent.assignMotor(rocket, mountComponent.getID().toString(), selectedMotor); }
+			catch (Exception e) { throw new RuntimeException(e); }
+		});
+		JsonObject result = new JsonObject();
+		result.addProperty("selected_motor", bestMotor);
+		result.addProperty("target_apogee_m", targetMeters);
+		result.addProperty("predicted_apogee_m", bestApogee);
+		result.addProperty("absolute_error_m", bestError);
+		result.add("trials", trials);
+		return result;
+	}
+
+	private String buildLocalizedReport(JsonObject results, boolean turkish) {
+		String error = jsonString(results, "error");
+		if (error != null) return turkish ? "Simülasyon tamamlanamadı: " + error : "Simulation failed: " + error;
+		double apogee = jsonDouble(results, "apogee_meters");
+		double velocity = jsonDouble(results, "max_velocity_ms");
+		double acceleration = jsonDouble(results, "max_acceleration_ms2");
+		double stability = jsonDouble(results, "minimum_stability_calibers");
+		double flightTime = jsonDouble(results, "total_flight_time_s");
+		if (turkish) {
+			StringBuilder text = new StringBuilder("Bu roket mevcut motor ve ayarlarla simülasyonda");
+			if (Double.isFinite(apogee)) text.append(" yaklaşık ").append(String.format("%.2f", apogee)).append(" m apojeye çıkabiliyor");
+			if (Double.isFinite(velocity)) text.append(", maksimum ").append(String.format("%.2f", velocity)).append(" m/s hıza ulaşıyor");
+			if (Double.isFinite(acceleration)) text.append(", maksimum ivmesi ").append(String.format("%.2f", acceleration)).append(" m/s²");
+			if (Double.isFinite(flightTime)) text.append(" ve uçuş süresi yaklaşık ").append(String.format("%.2f", flightTime)).append(" saniye");
+			text.append(".");
+			if (Double.isFinite(stability)) text.append(" Minimum stabilite marjı ").append(String.format("%.2f", stability)).append(" kalibre.");
+			if (results.has("warnings") && results.get("warnings").isJsonArray() && results.getAsJsonArray("warnings").size() > 0)
+				text.append(" Simülasyon uyarısı: ").append(results.getAsJsonArray("warnings").get(0).getAsString());
+			return text.toString();
+		}
+		return "Current simulation: apogee " + String.format("%.2f", apogee) + " m, maximum velocity " +
+				String.format("%.2f", velocity) + " m/s, flight time " + String.format("%.2f", flightTime) + " s.";
+	}
+
+    private void appendMotorStatus(RocketComponent component, StringBuilder sb, int depth,
+                                   info.openrocket.core.rocketcomponent.FlightConfigurationId selectedId) {
         if (component instanceof MotorMount) {
             MotorMount mount = (MotorMount) component;
             String motorText = "none";
             try {
-                info.openrocket.core.rocketcomponent.FlightConfigurationId fcid =
-                        info.openrocket.core.rocketcomponent.FlightConfigurationId.DEFAULT_VALUE_FCID;
-                info.openrocket.core.motor.MotorConfiguration config = mount.getMotorConfig(fcid);
+                info.openrocket.core.motor.MotorConfiguration config = mount.getMotorConfig(selectedId);
                 if (config != null && config.getMotor() != null) {
                     motorText = config.getMotor().getDesignation();
                 }
@@ -353,17 +592,18 @@ public class QwenAssistantPanel extends JPanel {
                 sb.append("  ");
             }
             sb.append("- ").append(component.getName())
+              .append(" id=").append(component.getID())
               .append(" [").append(component.getClass().getSimpleName()).append("] motor=")
               .append(motorText).append("\n");
         }
         for (RocketComponent child : component.getChildren()) {
-            appendMotorStatus(child, sb, depth + 1);
+            appendMotorStatus(child, sb, depth + 1, selectedId);
         }
     }
 
     private String getMotorStatus(Rocket rocket) {
         StringBuilder sb = new StringBuilder();
-        appendMotorStatus(rocket, sb, 0);
+        appendMotorStatus(rocket, sb, 0, rocket.getSelectedConfiguration().getId());
         String result = sb.toString().trim();
         return result.isEmpty() ? "- no motor mounts found" : result;
     }
@@ -541,19 +781,46 @@ public class QwenAssistantPanel extends JPanel {
                 
                 Rocket rocket = document.getRocket();
                 String retryPrefix = "";
+                java.util.Set<String> successfulMotorAssignments = new java.util.HashSet<>();
+                boolean turkishRequest = isTurkish(userGoal);
+				double targetApogee = parseTargetApogeeMeters(userGoal);
+
+				if (isReadOnlyRequest(userGoal)) {
+					JsonObject directResults = runSimulation();
+					appendChat("LlamaRocket", buildLocalizedReport(directResults, turkishRequest));
+					agent.logSession(userGoal, "Direct read-only report", null, directResults);
+					return;
+				}
         
         for (int i = 0; i < maxIterations; i++) {
             appendChat("System", "--- Iteration " + (i + 1) + "/" + maxIterations + " ---");
             
             // 1. Get current component tree
-            JsonObject tree = agent.getComponentTree(rocket);
+            JsonObject tree = agent.getDesignSummary(rocket);
             
             // 2. Run simulation to get current state
             JsonObject results = runSimulation();
+
+			if (Double.isFinite(targetApogee)) {
+				double currentApogee = jsonDouble(results, "apogee_meters");
+				double tolerance = Math.max(2.0, targetApogee * 0.01);
+				if (Double.isFinite(currentApogee) && currentApogee > 0 && Math.abs(currentApogee - targetApogee) <= tolerance) {
+					String achieved = turkishRequest
+							? "Hedef tamamlandı: simülasyon apojesi " + String.format("%.2f", currentApogee) +
+							  " m; hedef " + String.format("%.2f", targetApogee) + " m."
+							: "Target achieved: simulated apogee " + String.format("%.2f", currentApogee) +
+							  " m; target " + String.format("%.2f", targetApogee) + " m.";
+					appendChat("LlamaRocket", achieved);
+					agent.logSession(userGoal, "Target tolerance reached", null, results);
+					break;
+				}
+			}
             
             // 3. Build state message
             String stateMsg = retryPrefix + 
-                              "USER GOAL: " + userGoal + "\n\n" +
+                              "USER GOAL: " + userGoal + "\n" +
+                              "RESPONSE LANGUAGE: " + (turkishRequest ? "Turkish" : "the user's language") +
+                              ". Every message, report and reason visible to the user MUST use this language.\n\n" +
                               "EXACT COMPONENT NAMES (use ONLY these — never invent Stage1/Stage2):\n" +
                               agent.getComponentNameList(rocket) + "\n\n" +
                               "CURRENT MOTOR STATUS:\n" +
@@ -584,7 +851,7 @@ public class QwenAssistantPanel extends JPanel {
             setStatus("");
 
             if (streamResult.getCombined().trim().isEmpty()) {
-                appendChat("Error", "Failed to get response from Qwen.");
+                appendChat("Error", "Failed to get response from LlamaRocket.");
                 break;
             }
 
@@ -592,7 +859,7 @@ public class QwenAssistantPanel extends JPanel {
             // 5. Parse action
             JsonObject action = normalizeAction(agent.parseAction(streamResult));
             if (action == null) {
-                appendChat("System", "Could not parse action. Asking Qwen to try again.");
+                appendChat("System", "Could not parse action. Asking LlamaRocket to try again.");
                 appendChat("System", "Raw model output: " + abbreviate(streamResult.getCombined(), 240));
 
                 // Remove the user prompt we just added so retries do not bloat the context.
@@ -606,7 +873,7 @@ public class QwenAssistantPanel extends JPanel {
             if (cmd == null) {
                 cmd = "";
             }
-            appendChat("Qwen", formatActionSummary(action));
+            appendChat("LlamaRocket", formatActionSummary(action));
 
             if (cmd.trim().isEmpty()) {
                 appendChat("System", "ACTION FAILED: missing required field \"action\". Raw output: " + abbreviate(streamResult.getCombined(), 300));
@@ -623,7 +890,128 @@ public class QwenAssistantPanel extends JPanel {
             JsonElement orkChanges = null;
             
             try {
-            if ("modify_components".equals(cmd)) {
+            if ("create_basic_rocket".equals(cmd)) {
+                try {
+                    document.startUndo("LlamaRocket created basic rocket");
+					double payloadMassKg = parsePayloadMassKg(userGoal);
+                    JsonObject created = agent.createBasicRocket(rocket, payloadMassKg);
+                    document.stopUndo();
+					JsonObject motorOptimization = null;
+					if (Double.isFinite(targetApogee)) {
+						appendChat("System", "Searching compatible motors for " + String.format("%.2f", targetApogee) + " m target...");
+						motorOptimization = optimizeMotorForApogee(rocket, targetApogee);
+					}
+                    agent.addAssistantMessage(action.toString());
+                    agent.addUserMessage("VALID BASIC ROCKET CREATED: " + created +
+                            ". Requested payload was applied as " + payloadMassKg +
+							" kg. Motor optimization: " + (motorOptimization != null ? motorOptimization : "not requested") +
+							". Inspect the resulting simulation, tune geometry only if needed, then finish.");
+                } catch (Exception e) {
+                    document.stopUndo();
+                    agent.addAssistantMessage(action.toString());
+                    agent.addUserMessage("ACTION FAILED: " + e.getMessage() + ". Inspect the existing design instead.");
+                }
+                continue;
+            } else if ("inspect_design".equals(cmd)) {
+                agent.addAssistantMessage(action.toString());
+                agent.addUserMessage("DESIGN INSPECTION (SI units): " + agent.getComponentTree(rocket) +
+                        ". Use component IDs for every mutation. What is your next action?");
+                continue;
+            } else if ("list_materials".equals(cmd)) {
+                String type = jsonString(action, "material_type");
+                try {
+                    JsonArray materials = agent.listMaterials(type);
+                    agent.addAssistantMessage(action.toString());
+                    agent.addUserMessage("AVAILABLE " + type + " MATERIALS: " + materials +
+                            ". Select one exact material name with set_material.");
+                } catch (Exception e) {
+                    agent.addAssistantMessage(action.toString());
+                    agent.addUserMessage("ACTION FAILED: " + e.getMessage());
+                }
+                continue;
+            } else if ("set_material".equals(cmd)) {
+                String componentId = jsonString(action, "component_id");
+                String type = jsonString(action, "material_type");
+                String name = jsonString(action, "material_name");
+                try {
+                    document.startUndo("LlamaRocket changed material");
+                    agent.setMaterial(rocket, componentId, type, name);
+                    document.stopUndo();
+                    JsonObject newResults = runSimulation();
+                    agent.addAssistantMessage(action.toString());
+                    agent.addUserMessage("Material applied. Updated component: " +
+                            agent.getComponentTree(agent.findComponentById(rocket, componentId)) +
+                            ". Simulation: " + newResults + ". What is your next action?");
+                } catch (Exception e) {
+                    document.stopUndo();
+                    agent.addAssistantMessage(action.toString());
+                    agent.addUserMessage("ACTION FAILED AND ROLLED BACK: " + e.getMessage());
+                }
+                continue;
+            } else if ("set_properties".equals(cmd)) {
+                String componentId = jsonString(action, "component_id");
+                JsonObject properties = action.has("properties") && action.get("properties").isJsonObject()
+                        ? action.getAsJsonObject("properties") : null;
+                if (componentId == null || properties == null || properties.size() == 0) {
+                    agent.addAssistantMessage(action.toString());
+                    agent.addUserMessage("ACTION FAILED: set_properties requires component_id and a non-empty properties object.");
+                    continue;
+                }
+                Map<String, Object> changes = new java.util.LinkedHashMap<>();
+                for (Map.Entry<String, JsonElement> entry : properties.entrySet()) {
+                    JsonElement value = entry.getValue();
+                    if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isBoolean()) changes.put(entry.getKey(), value.getAsBoolean());
+                    else if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber()) changes.put(entry.getKey(), value.getAsDouble());
+                    else if (value.isJsonPrimitive()) changes.put(entry.getKey(), value.getAsString());
+                }
+                try {
+                    document.startUndo("LlamaRocket changed component properties");
+                    agent.setProperties(rocket, componentId, changes);
+                    document.stopUndo();
+                    JsonObject newResults = runSimulation();
+                    agent.addAssistantMessage(action.toString());
+                    agent.addUserMessage("Properties applied. Updated component: " +
+                            agent.getComponentTree(agent.findComponentById(rocket, componentId)) +
+                            ". Simulation: " + newResults + ". What is your next action?");
+                } catch (Exception e) {
+                    document.stopUndo();
+                    agent.addAssistantMessage(action.toString());
+                    agent.addUserMessage("ACTION FAILED AND ROLLED BACK: " + e.getMessage());
+                }
+                continue;
+            } else if ("add_component".equals(cmd)) {
+                String parentId = jsonString(action, "parent_id");
+                String type = jsonString(action, "component_type");
+                String name = jsonString(action, "name");
+                try {
+                    document.startUndo("LlamaRocket added component");
+                    RocketComponent added = agent.addComponentById(rocket, parentId, type, name);
+                    document.stopUndo();
+                    agent.addAssistantMessage(action.toString());
+                    agent.addUserMessage("Component added: " + agent.getComponentTree(added) +
+                            ". Full design: " + agent.getDesignSummary(rocket) + ". What is your next action?");
+                } catch (Exception e) {
+                    document.stopUndo();
+                    agent.addAssistantMessage(action.toString());
+                    agent.addUserMessage("ACTION FAILED AND ROLLED BACK: " + e.getMessage());
+                }
+                continue;
+            } else if ("delete_component_by_id".equals(cmd)) {
+                String componentId = jsonString(action, "component_id");
+                try {
+                    document.startUndo("LlamaRocket deleted component");
+                    agent.deleteComponentById(rocket, componentId);
+                    document.stopUndo();
+                    agent.addAssistantMessage(action.toString());
+                    agent.addUserMessage("Component deleted. Full design: " + agent.getDesignSummary(rocket) +
+                            ". What is your next action?");
+                } catch (Exception e) {
+                    document.stopUndo();
+                    agent.addAssistantMessage(action.toString());
+                    agent.addUserMessage("ACTION FAILED AND ROLLED BACK: " + e.getMessage());
+                }
+                continue;
+            } else if ("modify_components".equals(cmd)) {
                 JsonArray modifications = action.getAsJsonArray("modifications");
                 if (modifications != null) {
                     orkChanges = modifications;
@@ -796,13 +1184,23 @@ public class QwenAssistantPanel extends JPanel {
                     agent.logSession(userGoal, reasoning, deleteChange, newResults);
                 }
             } else if ("assign_motor".equals(cmd)) {
-                String compName = jsonString(action, "component_name");
+                String requestedId = jsonString(action, "component_id");
+                final String compName = requestedId != null ? requestedId : jsonString(action, "component_name");
                 String motorName = jsonString(action, "motor");
                 if (compName == null || motorName == null) {
                     agent.addAssistantMessage(action.toString());
-                    agent.addUserMessage("ACTION FAILED: assign_motor requires \"component_name\" and \"motor\".");
+                    agent.addUserMessage("ACTION FAILED: assign_motor requires \"component_id\" and \"motor\".");
                     continue;
                 }
+
+				String assignmentKey = compName + "|" + motorName.toLowerCase(Locale.ROOT);
+				if (successfulMotorAssignments.contains(assignmentKey)) {
+					agent.addAssistantMessage(action.toString());
+					agent.addUserMessage("ACTION REJECTED: This exact motor is already assigned. Motor status: " +
+							getMotorStatus(rocket) + ". Simulation: " + results +
+							". Do not assign it again; inspect/tune geometry or finish.");
+					continue;
+				}
                 
                 appendChat("System", "Executing: assignMotor(" + compName + ", " + motorName + ")");
                 
@@ -824,6 +1222,7 @@ public class QwenAssistantPanel extends JPanel {
                 } else {
                     SwingUtilities.invokeAndWait(() -> document.addUndoPosition("AI Assistant assigned motor"));
                     JsonObject newResults = runSimulation();
+					successfulMotorAssignments.add(assignmentKey);
                     
                     double apogee = newResults.get("apogee_meters").getAsDouble();
                     String apogeeText = String.format("%.2f m", apogee);
@@ -831,7 +1230,9 @@ public class QwenAssistantPanel extends JPanel {
                     
                     // Feed result back
                     agent.addAssistantMessage(action.toString());
-                    agent.addUserMessage("Simulation complete. New apogee: " + apogeeText + ". Component tree: " + agent.getComponentTree(rocket).toString() + ". What is your next action?");
+                    agent.addUserMessage("MOTOR ASSIGNMENT SUCCEEDED. Motor status: " + getMotorStatus(rocket) +
+							". Simulation complete. New apogee: " + apogeeText + ". Component tree: " +
+							agent.getDesignSummary(rocket) + ". Do NOT assign the same motor again. Tune geometry or finish.");
                     
                     JsonObject motorChange = new JsonObject();
                     motorChange.addProperty("type", "motor_assignment");
@@ -845,7 +1246,7 @@ public class QwenAssistantPanel extends JPanel {
                 if (msg == null) {
                     msg = "No plan provided.";
                 }
-                appendChat("System", "Qwen Plan: " + msg);
+                appendChat("System", "LlamaRocket Plan: " + msg);
                 agent.logSession(userGoal, reasoning, null, results);
                 
                 agent.addAssistantMessage(action.toString());
@@ -904,7 +1305,7 @@ public class QwenAssistantPanel extends JPanel {
         try {
             if (document.getSimulations().isEmpty()) {
                 Simulation sim = new Simulation(document.getRocket());
-                sim.setName("Qwen Simulation");
+                sim.setName("LlamaRocket Simulation");
                 document.addSimulation(sim);
             }
             
@@ -933,6 +1334,22 @@ public class QwenAssistantPanel extends JPanel {
             res.addProperty("max_velocity_ms", velocity);
             res.addProperty("time_to_apogee_s", timeToApogee);
             res.addProperty("total_flight_time_s", totalFlightTime);
+            addFinite(res, "max_acceleration_ms2", data.getMaxAcceleration());
+            addFinite(res, "max_mach", data.getMaxMachNumber());
+            addFinite(res, "launch_rod_velocity_ms", data.getLaunchRodVelocity());
+            addFinite(res, "deployment_velocity_ms", data.getDeploymentVelocity());
+            addFinite(res, "ground_hit_velocity_ms", data.getGroundHitVelocity());
+
+            if (data.getBranchCount() > 0) {
+                info.openrocket.core.simulation.FlightDataBranch mainBranch = data.getBranch(0);
+                addFinite(res, "minimum_stability_calibers", mainBranch.getMinimum(FlightDataType.TYPE_STABILITY));
+                addFinite(res, "maximum_stability_calibers", mainBranch.getMaximum(FlightDataType.TYPE_STABILITY));
+                if (mainBranch.getLength() > 0) {
+                    addFinite(res, "launch_mass_kg", mainBranch.getByIndex(FlightDataType.TYPE_MASS, 0));
+                    addFinite(res, "launch_cg_m", mainBranch.getByIndex(FlightDataType.TYPE_CG_LOCATION, 0));
+                    addFinite(res, "launch_cp_m", mainBranch.getByIndex(FlightDataType.TYPE_CP_LOCATION, 0));
+                }
+            }
             
             // Collect warnings to diagnose 0.0m apogee issues
             if (data.getWarningSet() != null && !data.getWarningSet().isEmpty()) {
@@ -956,5 +1373,11 @@ public class QwenAssistantPanel extends JPanel {
             res.addProperty("error", e.getMessage());
         }
         return res;
+    }
+
+    private void addFinite(JsonObject target, String key, Double value) {
+        if (value != null && Double.isFinite(value)) {
+            target.addProperty(key, value);
+        }
     }
 }

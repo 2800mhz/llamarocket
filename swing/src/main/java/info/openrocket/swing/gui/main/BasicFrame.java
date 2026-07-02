@@ -268,7 +268,7 @@ private static final Translator trans = Application.getTranslator();
 		vertical.setTopComponent(tabbedPane);
 		vertical.setBottomComponent(rocketpanel);
 		
-		//// The Qwen AI Assistant Panel
+		//// The LlamaRocket AI Assistant Panel
 		info.openrocket.swing.gui.components.QwenAssistantPanel qwenAssistantPanel = new info.openrocket.swing.gui.components.QwenAssistantPanel(this, document);
 		
 		JSplitPane horizontal = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, true);

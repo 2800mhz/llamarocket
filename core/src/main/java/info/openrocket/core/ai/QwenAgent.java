@@ -30,12 +30,14 @@ import com.google.gson.JsonElement;
 
 import java.io.*;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -45,6 +47,23 @@ import java.nio.file.Paths;
 import java.time.Instant;
 
 public class QwenAgent {
+	public enum Provider {
+		OLLAMA("Local Ollama", "http://localhost:11434"),
+		OPENROUTER("OpenRouter", "https://openrouter.ai/api/v1"),
+		NVIDIA_NIM("NVIDIA NIM / Nemotron", "https://integrate.api.nvidia.com/v1"),
+		MINIMAX("MiniMax", "https://api.minimax.io/v1"),
+		OPENAI_COMPATIBLE("OpenAI-compatible", "");
+
+		private final String label;
+		private final String defaultUrl;
+		Provider(String label, String defaultUrl) { this.label = label; this.defaultUrl = defaultUrl; }
+		public String getDefaultUrl() { return defaultUrl; }
+		@Override public String toString() { return label; }
+	}
+
+	private final LlamaRocketDesignService designService = new LlamaRocketDesignService();
+	private static final Object OLLAMA_START_LOCK = new Object();
+	private static volatile String ollamaStartupError;
 
     private String loadSystemPrompt() {
         try (InputStream is = QwenAgent.class.getResourceAsStream("/ai/system_prompt.txt")) {
@@ -70,7 +89,9 @@ public class QwenAgent {
 
 
     private String modelName;
-    private final String ollamaUrl;
+    private String ollamaUrl;
+	private Provider provider = Provider.OLLAMA;
+	private String apiKey = "";
     private final Gson gson;
     private List<JsonObject> messageHistory;
     private final String sessionId;
@@ -205,8 +226,15 @@ public class QwenAgent {
 
     public AgentStreamResult sendPromptStreaming(StreamCallback callback) throws Exception {
         pruneHistory();
+		if (provider != Provider.OLLAMA) return sendOpenAiCompatible(callback);
+		if (isLocalOllamaUrl(this.ollamaUrl) && !ensureLocalOllamaRunning(this.ollamaUrl)) {
+			throw new IOException(ollamaStartupError != null ? ollamaStartupError :
+					"Ollama is not available at " + this.ollamaUrl);
+		}
         URL url = new URL(this.ollamaUrl + "/api/chat");
         HttpURLConnection con = (HttpURLConnection) url.openConnection();
+		con.setConnectTimeout(10_000);
+		con.setReadTimeout(180_000);
         con.setRequestMethod("POST");
         con.setRequestProperty("Content-Type", "application/json; utf-8");
         con.setRequestProperty("Accept", "application/json");
@@ -224,8 +252,8 @@ public class QwenAgent {
         payload.addProperty("think", false);
         
         JsonObject options = new JsonObject();
-        options.addProperty("num_ctx", 32768);
-        options.addProperty("num_predict", 8192);
+        options.addProperty("num_ctx", 8192);
+        options.addProperty("num_predict", 768);
         payload.add("options", options);
 
         try(OutputStream os = con.getOutputStream()) {
@@ -270,6 +298,49 @@ public class QwenAgent {
         }
         return new AgentStreamResult(thinking.toString(), content.toString());
     }
+
+	private AgentStreamResult sendOpenAiCompatible(StreamCallback callback) throws Exception {
+		if (apiKey == null || apiKey.isBlank()) throw new IOException("Cloud provider API key is missing.");
+		URL url = new URL(this.ollamaUrl.replaceAll("/+$", "") + "/chat/completions");
+		HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+		connection.setRequestMethod("POST");
+		connection.setRequestProperty("Content-Type", "application/json; utf-8");
+		connection.setRequestProperty("Accept", "application/json");
+		connection.setRequestProperty("Authorization", "Bearer " + apiKey);
+		if (provider == Provider.OPENROUTER) connection.setRequestProperty("X-OpenRouter-Title", "LlamaRocket");
+		connection.setConnectTimeout(15_000);
+		connection.setReadTimeout(180_000);
+		connection.setDoOutput(true);
+
+		JsonObject payload = new JsonObject();
+		payload.addProperty("model", modelName);
+		JsonArray messages = new JsonArray();
+		for (JsonObject message : messageHistory) messages.add(message);
+		payload.add("messages", messages);
+		payload.addProperty("stream", false);
+		payload.addProperty("max_tokens", 768);
+		payload.addProperty("temperature", 0.2);
+		try (OutputStream output = connection.getOutputStream()) {
+			output.write(payload.toString().getBytes(StandardCharsets.UTF_8));
+		}
+		int status = connection.getResponseCode();
+		InputStream responseStream = status >= 200 && status < 300 ? connection.getInputStream() : connection.getErrorStream();
+		String response = responseStream == null ? "" : new String(responseStream.readAllBytes(), StandardCharsets.UTF_8);
+		if (status < 200 || status >= 300) throw new IOException(provider + " API error (HTTP " + status + "): " + response);
+		JsonObject root = JsonParser.parseString(response).getAsJsonObject();
+		JsonArray choices = root.getAsJsonArray("choices");
+		if (choices == null || choices.isEmpty()) throw new IOException(provider + " returned no choices.");
+		JsonObject message = choices.get(0).getAsJsonObject().getAsJsonObject("message");
+		String content = message != null && message.has("content") && !message.get("content").isJsonNull()
+				? message.get("content").getAsString() : "";
+		String thinking = message != null && message.has("reasoning_content") && !message.get("reasoning_content").isJsonNull()
+				? message.get("reasoning_content").getAsString() : "";
+		if (callback != null) {
+			if (!thinking.isEmpty()) callback.onThinkingChunk(thinking);
+			if (!content.isEmpty()) callback.onContentChunk(content);
+		}
+		return new AgentStreamResult(thinking, content);
+	}
 
     public JsonObject parseAction(QwenAgent.AgentStreamResult result) {
         if (result == null) {
@@ -319,12 +390,32 @@ public class QwenAgent {
     }
 
     public void setModelName(String modelName) {
+		if (modelName == null || modelName.isBlank()) {
+			throw new IllegalArgumentException("Model name cannot be empty.");
+		}
         this.modelName = modelName;
     }
+
+	public void setOllamaUrl(String ollamaUrl) {
+		if (ollamaUrl == null || ollamaUrl.isBlank()) {
+			throw new IllegalArgumentException("Ollama URL cannot be empty.");
+		}
+		this.ollamaUrl = ollamaUrl.replaceAll("/+$", "");
+	}
+
+	public void configureProvider(Provider provider, String baseUrl, String apiKey) {
+		this.provider = provider != null ? provider : Provider.OLLAMA;
+		String resolvedUrl = baseUrl == null || baseUrl.isBlank() ? this.provider.getDefaultUrl() : baseUrl.trim();
+		setOllamaUrl(resolvedUrl);
+		this.apiKey = apiKey != null ? apiKey.trim() : "";
+	}
+
+	public Provider getProvider() { return provider; }
 
     public static List<String> getAvailableModels(String ollamaUrl) {
         List<String> models = new ArrayList<>();
         try {
+			ensureLocalOllamaRunning(ollamaUrl);
             URL url = new URL(ollamaUrl + "/api/tags");
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
@@ -354,41 +445,155 @@ public class QwenAgent {
         return models;
     }
 
+	/** Starts a locally installed Ollama server when localhost is configured and it is not running. */
+	public static boolean ensureLocalOllamaRunning(String ollamaUrl) {
+		if (!isLocalOllamaUrl(ollamaUrl)) return false;
+		if (isOllamaHealthy(ollamaUrl)) {
+			ollamaStartupError = null;
+			return true;
+		}
+		synchronized (OLLAMA_START_LOCK) {
+			if (isOllamaHealthy(ollamaUrl)) return true;
+			try {
+				String executable = findOllamaExecutable();
+				if (executable == null) {
+					ollamaStartupError = "Ollama is not installed or could not be found.";
+					return false;
+				}
+				Path log = Paths.get(System.getProperty("java.io.tmpdir"), "llamarocket-ollama.log");
+				new ProcessBuilder(executable, "serve")
+						.redirectErrorStream(true)
+						.redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile()))
+						.start();
+				for (int i = 0; i < 30; i++) {
+					if (isOllamaHealthy(ollamaUrl)) {
+						ollamaStartupError = null;
+						return true;
+					}
+					Thread.sleep(250);
+				}
+				ollamaStartupError = "Ollama was started but its API did not become ready. Log: " + log;
+			} catch (Exception e) {
+				ollamaStartupError = "Could not start Ollama: " + e.getMessage();
+			}
+		}
+		return false;
+	}
+
+	public static String getOllamaStartupError() {
+		return ollamaStartupError;
+	}
+
+	private static boolean isLocalOllamaUrl(String value) {
+		try {
+			String host = URI.create(value).getHost();
+			return "localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host) || "::1".equals(host);
+		} catch (Exception e) {
+			return false;
+		}
+	}
+
+	private static boolean isOllamaHealthy(String baseUrl) {
+		try {
+			HttpURLConnection connection = (HttpURLConnection) new URL(baseUrl.replaceAll("/+$", "") + "/api/tags").openConnection();
+			connection.setRequestMethod("GET");
+			connection.setConnectTimeout(500);
+			connection.setReadTimeout(1_000);
+			return connection.getResponseCode() == 200;
+		} catch (Exception ignored) {
+			return false;
+		}
+	}
+
+	private static String findOllamaExecutable() {
+		String override = System.getenv("OLLAMA_EXE");
+		if (override != null && Files.isRegularFile(Paths.get(override))) return override;
+		List<Path> candidates = new ArrayList<>();
+		String localAppData = System.getenv("LOCALAPPDATA");
+		if (localAppData != null) {
+			candidates.add(Paths.get(localAppData, "Programs", "Ollama", "ollama.exe"));
+			candidates.add(Paths.get(localAppData, "Ollama", "ollama.exe"));
+		}
+		String programFiles = System.getenv("ProgramFiles");
+		if (programFiles != null) candidates.add(Paths.get(programFiles, "Ollama", "ollama.exe"));
+		for (Path candidate : candidates) if (Files.isRegularFile(candidate)) return candidate.toString();
+		// On macOS/Linux and Windows installations already present on PATH.
+		return isWindows() ? null : "ollama";
+	}
+
+	private static boolean isWindows() {
+		return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows");
+	}
+
+	public static void pullModel(String ollamaUrl, String modelName) throws IOException {
+		if (modelName == null || modelName.isBlank()) {
+			throw new IllegalArgumentException("Model name cannot be empty.");
+		}
+		URL url = new URL(ollamaUrl.replaceAll("/+$", "") + "/api/pull");
+		HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+		connection.setRequestMethod("POST");
+		connection.setRequestProperty("Content-Type", "application/json; utf-8");
+		connection.setConnectTimeout(10_000);
+		connection.setReadTimeout(30 * 60_000);
+		connection.setDoOutput(true);
+		JsonObject payload = new JsonObject();
+		payload.addProperty("model", modelName.trim());
+		payload.addProperty("stream", false);
+		try (OutputStream output = connection.getOutputStream()) {
+			output.write(payload.toString().getBytes(StandardCharsets.UTF_8));
+		}
+		int status = connection.getResponseCode();
+		if (status != 200) {
+			String message;
+			try (InputStream error = connection.getErrorStream()) {
+				message = error == null ? "HTTP " + status : new String(error.readAllBytes(), StandardCharsets.UTF_8);
+			}
+			throw new IOException("Ollama model pull failed: " + message);
+		}
+		try (InputStream input = connection.getInputStream()) {
+			input.readAllBytes();
+		}
+	}
+
     public JsonObject getComponentTree(RocketComponent root) {
-        JsonObject result = new JsonObject();
-        JsonObject params = new JsonObject();
-
-        String[] propertiesToExtract = {"Length", "Radius", "OuterRadius", "InnerRadius", "Thickness", "Mass"};
-        
-        for (String prop : propertiesToExtract) {
-            try {
-                Method getter = root.getClass().getMethod("get" + prop);
-                Object val = getter.invoke(root);
-                if (val instanceof Number && !Double.isNaN(((Number) val).doubleValue())) {
-                    params.addProperty(prop.toLowerCase(), ((Number) val).doubleValue());
-                }
-            } catch (Exception e) {
-                // Ignore missing properties
-            }
-        }
-        
-        if (params.size() > 0) {
-            result.add(root.getName(), params);
-        } else {
-            result.add(root.getName(), new JsonObject()); // empty params
-        }
-
-        JsonArray children = new JsonArray();
-        for (RocketComponent child : root.getChildren()) {
-            children.add(getComponentTree(child));
-        }
-
-        if (children.size() > 0) {
-            result.add("children", children);
-        }
-
-        return result;
+		return designService.inspectComponent(root);
     }
+
+	public RocketComponent findComponentById(RocketComponent root, String id) {
+		return designService.findById(root, id);
+	}
+
+	public JsonObject getDesignSummary(RocketComponent root) {
+		return designService.inspectSummary(root);
+	}
+
+	public JsonObject createBasicRocket(Rocket rocket) {
+		return designService.createBasicRocket(rocket);
+	}
+
+	public JsonObject createBasicRocket(Rocket rocket, double payloadMassKg) {
+		return designService.createBasicRocket(rocket, payloadMassKg);
+	}
+
+	public void setProperties(Rocket rocket, String componentId, java.util.Map<String, Object> changes) throws Exception {
+		designService.setProperties(rocket, componentId, changes);
+	}
+
+	public RocketComponent addComponentById(Rocket rocket, String parentId, String type, String name) throws Exception {
+		return designService.addComponent(rocket, parentId, type, name);
+	}
+
+	public void deleteComponentById(Rocket rocket, String componentId) {
+		designService.deleteComponent(rocket, componentId);
+	}
+
+	public JsonArray listMaterials(String type) {
+		return designService.listMaterials(type);
+	}
+
+	public void setMaterial(Rocket rocket, String componentId, String type, String name) throws Exception {
+		designService.setMaterial(rocket, componentId, type, name);
+	}
     
     public RocketComponent findComponentByName(RocketComponent current, String name) {
         if (current.getName().equalsIgnoreCase(name)) {
@@ -547,7 +752,10 @@ public class QwenAgent {
     }
     
     public void assignMotor(Rocket rocket, String componentName, String motorDesignation) throws Exception {
-        RocketComponent comp = findComponentByName(rocket, componentName);
+        RocketComponent comp = designService.findById(rocket, componentName);
+        if (comp == null) {
+            comp = findComponentByName(rocket, componentName); // legacy saved conversations
+        }
         if (comp == null) throw new Exception("Component not found: " + componentName);
         if (!(comp instanceof MotorMount)) {
             throw new Exception("Component is not a motor mount. Use a BodyTube or InnerTube.");
@@ -604,7 +812,7 @@ public class QwenAgent {
     
     public void logSession(String userGoal, String reasoning, JsonElement orkChanges, JsonObject simResult) {
         String homeDir = System.getProperty("user.home");
-        Path sessionDir = Paths.get(homeDir, "qwenrocket-sessions");
+        Path sessionDir = Paths.get(homeDir, "llamarocket-sessions");
         try {
             Files.createDirectories(sessionDir);
             File logFile = sessionDir.resolve(sessionId + ".jsonl").toFile();
