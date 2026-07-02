@@ -1,51 +1,76 @@
 # LlamaRocket
 
-LlamaRocket is a local-first engineering agent built into OpenRocket. It can inspect a rocket at property level, edit the design through validated tools, select materials and motors, run simulations, and use the results in an iterative design loop.
+LlamaRocket is an AI-assisted model rocket design environment built on OpenRocket. It gives language models controlled access to the OpenRocket component model, material and motor databases, and flight simulator.
 
-The default model is `gemma4:e4b` when installed. The model selector discovers every model available through the configured Ollama server, so Gemma, Llama, Qwen and other compatible local models can all be used without changing the application. The **Pull Model** button can download any Ollama model by name and select it immediately.
+The agent can inspect a design, modify components, select materials and motors, run simulations, and use the results to continue working toward a design goal. OpenRocket remains responsible for component compatibility and flight physics.
 
-Cloud inference is available from **Settings** through OpenRouter, NVIDIA NIM/Nemotron, MiniMax, or any OpenAI-compatible `/v1/chat/completions` endpoint. Type a provider model ID in the editable model box. API keys remain in process memory and are never written to the rocket document or session logs. The application also reads `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, and `MINIMAX_API_KEY` when present.
+## Features
 
-## Current agent architecture
+- Natural-language rocket design and analysis
+- Stable component ID tracking
+- Dynamic discovery of editable component properties
+- SI units and enum choices in the agent context
+- Component creation, deletion, and property editing
+- Bulk, surface, and line material selection
+- OpenRocket motor database integration
+- Simulation feedback including apogee, velocity, acceleration, Mach, flight time, CG, CP, stability, and recovery data
+- Transactional multi-property changes
+- Conversation history stored with the rocket document
+- Local and cloud model providers
 
-- **Design inspector:** exposes component IDs, hierarchy, paths, materials, and editable scalar/enum properties.
-- **SI property schema:** values include units where known and enum choices where applicable.
-- **ID-based mutations:** agent changes target stable component UUIDs rather than ambiguous display names.
-- **Safe property batches:** every value is validated before application; a failed multi-property operation rolls back changes already applied by that batch.
-- **OpenRocket-native compatibility:** component creation delegates structural compatibility checks to OpenRocket.
-- **Material tools:** bulk, surface and line material databases are queryable and assignable by exact name.
-- **Simulation feedback:** apogee, velocity, timing, warnings and flight events return to the agent after changes.
-- **Deterministic goal controller:** target apogee and payload are parsed from the request; compatible motors are sampled from the OpenRocket database and simulated, and the closest result is selected before the language model tunes geometry.
-- **Convergence guard:** the run stops automatically when simulated apogee is within 2 m or 1% of the requested target.
-- **Legacy compatibility:** early QwenRocket actions and saved chat history remain readable while new conversations use the LlamaRocket tool protocol.
+## Model providers
 
-## Run
+### Local Ollama
 
-Requirements:
+Ollama is the default provider. LlamaRocket discovers all models installed on the configured Ollama server. The default model is `gemma4:e4b` when available.
+
+For local URLs, LlamaRocket checks whether the Ollama API is running and attempts to start `ollama serve` automatically. Standard Windows installation paths are detected. A custom executable can be provided through the `OLLAMA_EXE` environment variable.
+
+Models can also be downloaded from the interface with the `Pull Model` button.
+
+### Cloud providers
+
+The following providers are available from the settings dialog:
+
+- OpenRouter
+- NVIDIA NIM and Nemotron
+- MiniMax
+- Generic OpenAI-compatible APIs
+
+Cloud providers use the `/v1/chat/completions` protocol. The model field is editable, so any model supported by the selected provider can be used.
+
+API keys are kept in process memory. They are not written to rocket files or session logs. Keys can optionally be supplied through:
+
+- `OPENROUTER_API_KEY`
+- `NVIDIA_API_KEY`
+- `MINIMAX_API_KEY`
+
+## Requirements
 
 - Java 17
-- Ollama
-- At least one installed Ollama model
+- Ollama for local inference, or an API key for a cloud provider
 
-When the configured URL is local, LlamaRocket checks the Ollama API during startup and automatically launches `ollama serve` in the background if necessary. On Windows it detects standard Ollama installation locations; `OLLAMA_EXE` can point to a custom executable. Remote/custom servers are never started automatically.
+## Running locally
+
+Install or download a model:
 
 ```powershell
 ollama pull gemma4:e4b
+```
+
+Start LlamaRocket:
+
+```powershell
 .\gradlew.bat swing:run
 ```
 
-Other examples:
+The application attempts to start the local Ollama service when necessary.
 
-```powershell
-ollama pull llama3.2
-ollama pull qwen3.5:4b
-```
+## Agent workflow
 
-Models pulled from inside LlamaRocket appear in the selector automatically.
+For each request, the agent receives a compact description of the current rocket, motor configuration, and latest simulation results. It responds with one structured action. LlamaRocket validates and executes that action, runs a new simulation when required, and returns the updated state to the model.
 
-## Agent tools
-
-New agent conversations prefer these operations:
+Available operations include:
 
 - `inspect_design`
 - `create_basic_rocket`
@@ -58,13 +83,50 @@ New agent conversations prefer these operations:
 - `report`
 - `finish`
 
-The OpenRocket simulation remains an engineering estimate. LlamaRocket output is not a substitute for physical testing, range safety review, or applicable launch rules.
+Older QwenRocket actions and saved conversation history remain supported for compatibility.
+
+## Project structure
+
+- `core/`: OpenRocket simulation core and LlamaRocket agent services
+- `swing/`: desktop interface and assistant panel
+- `docs/`: OpenRocket documentation
+- `bridge/`: legacy Python integration
+
+Important agent files:
+
+- `core/src/main/java/info/openrocket/core/ai/LlamaRocketAgent.java`
+- `core/src/main/java/info/openrocket/core/ai/LlamaRocketDesignService.java`
+- `core/src/main/resources/ai/system_prompt.txt`
+- `swing/src/main/java/info/openrocket/swing/gui/components/QwenAssistantPanel.java`
 
 ## Development
 
+Compile the application:
+
 ```powershell
 .\gradlew.bat core:compileJava swing:compileJava
+```
+
+Run tests:
+
+```powershell
 .\gradlew.bat core:test swing:test
 ```
 
-The project is derived from OpenRocket and distributed under the GNU General Public License. See [LICENSE.TXT](LICENSE.TXT).
+Run the focused LlamaRocket tests:
+
+```powershell
+.\gradlew.bat core:test --tests info.openrocket.core.ai.LlamaRocketDesignServiceTest
+```
+
+## Current limitations
+
+- Agent quality depends on the selected language model.
+- Small local models may repeat actions or misunderstand complex design goals.
+- Advanced stage separation and recovery configuration tools are still limited.
+- Simulation results are engineering estimates and do not replace physical testing or range safety review.
+- The Swing assistant class retains its historical `QwenAssistantPanel` name for backward compatibility.
+
+## License
+
+LlamaRocket is derived from OpenRocket and distributed under the GNU General Public License. See [LICENSE.TXT](LICENSE.TXT).
