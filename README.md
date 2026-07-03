@@ -1,5 +1,7 @@
 # LlamaRocket
 
+![LlamaRocket interface](llamarocket-ui.png)
+
 LlamaRocket is an AI-assisted model rocket design environment built on OpenRocket. It gives language models controlled access to the OpenRocket component model, material and motor databases, and flight simulator.
 
 The agent can inspect a design, modify components, select materials and motors, run simulations, and use the results to continue working toward a design goal. OpenRocket remains responsible for component compatibility and flight physics.
