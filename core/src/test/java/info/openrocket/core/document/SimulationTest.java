@@ -136,6 +136,51 @@ public class SimulationTest extends BaseTestCase {
 	}
 
 	@Test
+	public void testRepeatedSimulationIsDeterministicWithSameOptions() throws SimulationException {
+		simulation.getOptions().setRandomSeed(123456789);
+		simulation.getOptions().getAverageWindModel().setAverage(2.0);
+		simulation.getOptions().getAverageWindModel().setStandardDeviation(0.5);
+
+		simulation.simulate();
+		double expectedApogee = simulation.getSimulatedData().getMaxAltitude();
+		double expectedVelocity = simulation.getSimulatedData().getMaxVelocity();
+
+		for (int i = 0; i < 10; i++) {
+			simulation.simulate();
+			assertEquals(expectedApogee, simulation.getSimulatedData().getMaxAltitude(), 0.0,
+					"Repeated simulations with the same seed/options must produce identical apogee.");
+			assertEquals(expectedVelocity, simulation.getSimulatedData().getMaxVelocity(), 0.0,
+					"Repeated simulations with the same seed/options must produce identical max velocity.");
+		}
+	}
+
+	@Test
+	public void testSeparateControlledSimulationsAreDeterministicWithSameSeed() throws SimulationException {
+		Rocket firstRocket = TestRockets.makeEstesAlphaIII();
+		Rocket secondRocket = TestRockets.makeEstesAlphaIII();
+		Simulation first = configuredDeterminismSimulation(firstRocket);
+		Simulation second = configuredDeterminismSimulation(secondRocket);
+
+		first.simulate();
+		second.simulate();
+
+		assertEquals(first.getSimulatedData().getMaxAltitude(), second.getSimulatedData().getMaxAltitude(), 0.0);
+		assertEquals(first.getSimulatedData().getMaxVelocity(), second.getSimulatedData().getMaxVelocity(), 0.0);
+		assertEquals(first.getSimulatedData().getTimeToApogee(), second.getSimulatedData().getTimeToApogee(), 0.0);
+	}
+
+	private Simulation configuredDeterminismSimulation(Rocket rocket) {
+		Simulation deterministicSimulation = new Simulation(rocket);
+		deterministicSimulation.setFlightConfigurationId(TestRockets.TEST_FCID_0);
+		deterministicSimulation.getOptions().setISAAtmosphere(true);
+		deterministicSimulation.getOptions().setTimeStep(0.05);
+		deterministicSimulation.getOptions().setRandomSeed(123456789);
+		deterministicSimulation.getOptions().getAverageWindModel().setAverage(2.0);
+		deterministicSimulation.getOptions().getAverageWindModel().setStandardDeviation(0.0);
+		return deterministicSimulation;
+	}
+
+	@Test
 	public void testConfigurationManagement() {
 		FlightConfigurationId newId = new FlightConfigurationId();
 		simulation.setFlightConfigurationId(newId);

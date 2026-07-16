@@ -14,6 +14,7 @@ import info.openrocket.core.simulation.SimulationEngine;
 import info.openrocket.core.simulation.BasicEventSimulationEngine;
 import info.openrocket.core.simulation.SimulationOptions;
 import info.openrocket.core.simulation.exception.SimulationException;
+import info.openrocket.core.models.wind.WindModelType;
 import info.openrocket.swing.gui.main.BasicFrame;
 import info.openrocket.core.startup.Application;
 import info.openrocket.core.motor.Motor;
@@ -52,6 +53,7 @@ public class QwenAssistantPanel extends JPanel {
     private JComboBox<String> modelSelector;
     private BasicFrame basicFrame;
     private boolean isThinking = false;
+    private static final int LLAMAROCKET_SIMULATION_SEED = 2800;
     
     private String ollamaUrl = "http://localhost:11434";
     private QwenAgent.Provider provider = QwenAgent.Provider.OLLAMA;
@@ -1311,6 +1313,7 @@ public class QwenAssistantPanel extends JPanel {
             }
             
             Simulation sim = document.getSimulations().get(0);
+            configureDeterministicAiSimulation(sim.getOptions());
             
             info.openrocket.core.rocketcomponent.Rocket rocket = document.getRocket();
             
@@ -1374,6 +1377,12 @@ public class QwenAssistantPanel extends JPanel {
             res.addProperty("error", e.getMessage());
         }
         return res;
+    }
+
+    private void configureDeterministicAiSimulation(SimulationOptions options) {
+        options.setRandomSeed(LLAMAROCKET_SIMULATION_SEED);
+        options.setWindModelType(WindModelType.AVERAGE);
+        options.getAverageWindModel().setStandardDeviation(0.0);
     }
 
     private void addFinite(JsonObject target, String key, Double value) {
