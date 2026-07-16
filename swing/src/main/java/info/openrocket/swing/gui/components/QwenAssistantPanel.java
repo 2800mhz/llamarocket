@@ -1,6 +1,7 @@
 package info.openrocket.swing.gui.components;
 
 import info.openrocket.core.ai.LlamaRocketAgent;
+import info.openrocket.core.ai.LlamaRocketMotorSelector;
 import info.openrocket.core.ai.QwenAgent;
 import info.openrocket.core.document.OpenRocketDocument;
 import info.openrocket.core.document.Simulation;
@@ -486,33 +487,22 @@ public class QwenAssistantPanel extends JPanel {
 	private JsonObject optimizeMotorForApogee(Rocket rocket, double targetMeters) throws Exception {
 		RocketComponent mountComponent = findFirstMotorMount(rocket);
 		if (!(mountComponent instanceof MotorMount)) throw new IllegalStateException("No motor mount found.");
-		double maxDiameter = mountComponent instanceof info.openrocket.core.rocketcomponent.InnerTube tube
-				? tube.getInnerRadius() * 2.0 + 0.0002 : 0.030;
 		List<? extends Motor> all = Application.getMotorSetDatabase()
 				.findMotors(null, null, null, null, Double.NaN, Double.NaN);
-		java.util.Map<String, Motor> unique = new java.util.TreeMap<>();
-		for (Motor motor : all) {
-			double impulse = motor.getTotalImpulseEstimate();
-			if (motor.getDiameter() <= maxDiameter && Double.isFinite(impulse) && impulse > 1.0 && impulse <= 160.0)
-				unique.putIfAbsent(motor.getDesignation(), motor);
-		}
-		List<Motor> sorted = new java.util.ArrayList<>(unique.values());
-		sorted.sort(java.util.Comparator.comparingDouble(Motor::getTotalImpulseEstimate));
-		if (sorted.isEmpty()) throw new IllegalStateException("No compatible motors found for mount diameter " + maxDiameter + " m.");
-
-		List<Motor> candidates = new java.util.ArrayList<>();
-		int limit = Math.min(24, sorted.size());
-		for (int i = 0; i < limit; i++) {
-			int index = limit == 1 ? 0 : (int) Math.round(i * (sorted.size() - 1.0) / (limit - 1.0));
-			Motor candidate = sorted.get(index);
-			if (!candidates.contains(candidate)) candidates.add(candidate);
+		LlamaRocketMotorSelector.Plan plan = new LlamaRocketMotorSelector()
+				.select(rocket.getSelectedConfiguration(), (MotorMount) mountComponent, all, targetMeters, 16);
+		if (plan.getCandidates().isEmpty()) {
+			throw new IllegalStateException("No motor passed deterministic filters. Database motors=" +
+					plan.getTotalMotors() + ", physical_fit=" + plan.getPhysicalFitCount() +
+					", twr_pass=" + plan.getTwrPassCount() + ", impulse_ratio_pass=" +
+					plan.getImpulseRatioPassCount() + ". Try a larger motor mount, lighter mass, or lower apogee.");
 		}
 
 		String bestMotor = null;
 		double bestApogee = Double.NaN;
 		double bestError = Double.POSITIVE_INFINITY;
 		JsonArray trials = new JsonArray();
-		for (Motor candidate : candidates) {
+		for (LlamaRocketMotorSelector.Candidate candidate : plan.getCandidates()) {
 			String designation = candidate.getDesignation();
 			try {
 				SwingUtilities.invokeAndWait(() -> {
@@ -526,6 +516,10 @@ public class QwenAssistantPanel extends JPanel {
 				JsonObject trial = new JsonObject();
 				trial.addProperty("motor", designation);
 				trial.addProperty("apogee_m", apogee);
+				trial.addProperty("total_impulse_ns", candidate.getTotalImpulseNs());
+				trial.addProperty("impulse_ratio_ns_per_kg", candidate.getImpulseRatioNsPerKg());
+				trial.addProperty("average_twr", candidate.getAverageTwr());
+				if (Double.isFinite(candidate.getMaxTwr())) trial.addProperty("max_twr", candidate.getMaxTwr());
 				trials.add(trial);
 				if (error < bestError) {
 					bestError = error;
@@ -547,6 +541,13 @@ public class QwenAssistantPanel extends JPanel {
 		result.addProperty("target_apogee_m", targetMeters);
 		result.addProperty("predicted_apogee_m", bestApogee);
 		result.addProperty("absolute_error_m", bestError);
+		result.addProperty("database_motors", plan.getTotalMotors());
+		result.addProperty("physical_fit_candidates", plan.getPhysicalFitCount());
+		result.addProperty("twr_candidates", plan.getTwrPassCount());
+		result.addProperty("impulse_ratio_candidates", plan.getImpulseRatioPassCount());
+		if (Double.isFinite(plan.getTargetImpulseRatioNsPerKg())) {
+			result.addProperty("target_impulse_ratio_ns_per_kg", plan.getTargetImpulseRatioNsPerKg());
+		}
 		result.add("trials", trials);
 		return result;
 	}

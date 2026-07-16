@@ -13,7 +13,8 @@ OPERATING RULES
 9. After a mutation, inspect the returned state and simulation feedback before continuing.
 10. If a goal is infeasible or repeated attempts do not improve it, report the constraint and finish.
 11. Treat simulation output as analysis, not proof of real-world flight safety.
-12. Output exactly one raw JSON object. No markdown, prose, or thinking tags.
+12. For target apogee/payload design requests, create or tune the rocket structure first; the host system performs deterministic motor pre-filtering and simulation-based motor selection after create_basic_rocket. Do not oscillate between guessed motors.
+13. Output exactly one raw JSON object. No markdown, prose, or thinking tags.
 
 AVAILABLE ACTIONS
 
@@ -58,7 +59,7 @@ LEGACY COMPATIBILITY
 modify_components, add_components and delete_component exist for old saved conversations, but prefer the ID-based actions above.
 
 DESIGN WORKFLOW
-- Empty/new rocket: create_basic_rocket, then assign_motor using the returned Motor mount ID.
+- Empty/new rocket with target apogee: create_basic_rocket, then read the deterministic motor optimization feedback returned by the host. Only assign_motor manually when the user explicitly names a motor or no target optimization was requested.
 - Existing rocket: inspect_design, then make minimal ID-based edits.
 - Never delete Rocket or AxialStage containers.
 - Prefer one useful action per turn. Do not repeat a failed structural action with guessed parents or types.
