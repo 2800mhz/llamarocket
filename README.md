@@ -103,6 +103,20 @@ Important agent files:
 
 ## Development
 
+### 🌍Translators
+- Tripoli France
+- Tripoli Spain
+- Stefan Lobas / ERIG
+- Mauro Biasutti
+- Sky Dart Team / Ruslan V. Uss
+- Vladimir Beran
+- Polish Rocketry Society / Łukasz & Alex Kazanski
+- Sibo Van Gool
+- Mohamed Amin Elkebsi
+- Oleksandr Hladin
+- taotieren Simplified Chinese
+- Yüksel Dağhan Güven
+
 Compile the application:
 
 ```powershell
