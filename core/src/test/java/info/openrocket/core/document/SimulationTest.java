@@ -233,8 +233,8 @@ public class SimulationTest extends BaseTestCase {
 		FlightData flightData =  simulation.getSimulatedData();
 		FlightDataBranch branch = flightData.getBranch(0);
 
-		List<Double> altitudeData = branch.get(FlightDataType.TYPE_ALTITUDE);
-		List<Double> altitudeASLData = branch.get(FlightDataType.TYPE_ALTITUDE_ABOVE_SEA);
+		List<Double> altitudeData = branch.getView(FlightDataType.TYPE_ALTITUDE);
+		List<Double> altitudeASLData = branch.getView(FlightDataType.TYPE_ALTITUDE_ABOVE_SEA);
 
 		assertNotNull(altitudeData);
 		assertNotNull(altitudeASLData);
@@ -266,8 +266,8 @@ public class SimulationTest extends BaseTestCase {
 		FlightData flightData =  simulation.getSimulatedData();
 		FlightDataBranch branch = flightData.getBranch(0);
 
-		List<Double> altitudeData = branch.get(FlightDataType.TYPE_ALTITUDE);
-		List<Double> altitudeASLData = branch.get(FlightDataType.TYPE_ALTITUDE_ABOVE_SEA);
+		List<Double> altitudeData = branch.getView(FlightDataType.TYPE_ALTITUDE);
+		List<Double> altitudeASLData = branch.getView(FlightDataType.TYPE_ALTITUDE_ABOVE_SEA);
 
 		assertNotNull(altitudeData);
 		assertNotNull(altitudeASLData);

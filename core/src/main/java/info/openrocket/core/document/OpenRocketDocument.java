@@ -156,6 +156,7 @@ public class OpenRocketDocument implements ComponentChangeListener, StateChangeL
 	private void init() {
 		clearUndo();
 		rocket.addComponentChangeListener(this);
+		docPrefs.addChangeListener(this);
 	}
 	
 	/**

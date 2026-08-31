@@ -47,6 +47,15 @@ API keys are kept in process memory. They are not written to rocket files or ses
 - `NVIDIA_API_KEY`
 - `MINIMAX_API_KEY`
 
+### Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+
+- Committers and reviewers: [OpenRocket organization members](https://github.com/orgs/openrocket/people)
+- Approvers: [OpenRocket organization owners](https://github.com/orgs/openrocket/people?query=role%3Aowner)
+
+OpenRocket does not collect telemetry or upload rocket designs. It makes network requests for user-facing functions such as checking for application and motor-database updates, opening online resources, and submitting a bug report when requested by the user. Update checks can be disabled in the application preferences.
+
 ## Requirements
 
 - Java 17
